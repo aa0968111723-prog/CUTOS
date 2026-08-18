@@ -137,6 +137,18 @@ export async function previewOperationManifest(id: string, opIndex: number): Pro
   return manifest;
 }
 
+export interface AiosHealth {
+  configured: boolean;
+  reachable?: boolean;
+  status?: number;
+  latencyMs?: number;
+  error?: string;
+}
+
+export async function checkAiosHealth(): Promise<AiosHealth> {
+  return parse(await fetch("/api/aios/health", { cache: "no-store" }));
+}
+
 export async function previewPlanManifest(id: string): Promise<PreviewManifest> {
   const { manifest } = await parse<{ manifest: PreviewManifest }>(
     await fetch(`/api/projects/${id}/preview/plan`, { method: "POST" }),

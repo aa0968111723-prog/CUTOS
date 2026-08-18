@@ -180,6 +180,11 @@ export const zhTW = {
   "aios.model": "模型",
   "aios.bridge": "已將剪輯能力開放給 AI‑OS 代理，可雙向操作。",
   "aios.manifest": "查看能力清單",
+  "aios.test": "測試連線",
+  "aios.testing": "測試中…",
+  "aios.reachable": "可連線（{ms} ms）",
+  "aios.unreachable": "無法連線 AI‑OS Kernel",
+  "aios.notConfigured": "尚未設定 AI‑OS Kernel（可用環境變數 CUTOS_AIOS_KERNEL_URL 設定）",
 
   "error.PROJECT_NOT_FOUND": "找不到這個專案。",
   "error.TIMELINE_NOT_FOUND": "找不到這個專案的時間軸。",
