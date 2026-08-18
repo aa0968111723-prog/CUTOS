@@ -29,6 +29,26 @@ Goal: natural-language pause removal from import to export.
 - FFmpeg export
 - Automated verification of output duration and media integrity
 
+## Phase 1.5 — Instant Preview + zh-TW productization
+
+Goal: make CUTOS feel like a real conversational editor by showing edited results immediately, without requiring a full FFmpeg render for every change, while making the entire user-facing product experience Traditional Chinese (Taiwan).
+
+- Shared Timeline semantics for preview and export
+- Preview compiler + preview manifest
+- Source time ↔ edited timeline time mapping
+- Instant preview for trim / split / delete / silence removal / speed
+- Caption overlay preview
+- Timeline seek ↔ player sync
+- Undo / redo updates preview immediately
+- Preview / export parity tests
+- Progressive enhancement with HTMLVideoElement / MediaSource / WebCodecs
+- Full zh-TW UI copy for project, agent, timeline, jobs, review and export
+- Chinese Agent Activity states without exposing hidden chain-of-thought
+- Chinese validation, empty, loading, error and success states
+- Agent-first mobile layout with timeline as a secondary surface
+
+Detailed specification: [`PR4_INSTANT_PREVIEW_ZH_TW.md`](PR4_INSTANT_PREVIEW_ZH_TW.md)
+
 ## Phase 2 — Semantic editing
 
 - Speaker diarization

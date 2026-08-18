@@ -11,7 +11,7 @@ const BodySchema = z.object({ opIndex: z.number().int().nonnegative() });
 export async function POST(req: Request, ctx: { params: { id: string } }) {
   try {
     const parsed = BodySchema.safeParse(await req.json().catch(() => ({})));
-    if (!parsed.success) return errorResponse(400, "opIndex is required.");
+    if (!parsed.success) return errorResponse(400, "VALIDATION_FAILED", "opIndex is required.");
     return json(previewOperation(ctx.params.id, parsed.data.opIndex));
   } catch (error) {
     return handleError(error);

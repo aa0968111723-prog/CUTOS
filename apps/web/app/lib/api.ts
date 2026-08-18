@@ -1,16 +1,26 @@
-import type { ProjectDTO, ProjectSummaryDTO } from "./types.js";
+import type { PreviewManifest, ProjectDTO, ProjectSummaryDTO } from "./types.js";
 
-export interface ApiError {
-  error: string;
-  issues?: string[];
+export interface ApiErrorBody {
+  code?: string;
+  message?: string;
+}
+
+/** Error carrying a stable app error code so the UI can render zh-TW copy. */
+export class ApiRequestError extends Error {
+  constructor(
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "ApiRequestError";
+  }
 }
 
 async function parse<T>(res: Response): Promise<T> {
-  const data = (await res.json().catch(() => ({}))) as T & Partial<ApiError>;
+  const data = (await res.json().catch(() => ({}))) as T & Partial<ApiErrorBody>;
   if (!res.ok) {
-    const err = data as ApiError;
-    const detail = err.issues?.length ? `: ${err.issues.join("; ")}` : "";
-    throw new Error(`${err.error ?? res.statusText}${detail}`);
+    const body = data as ApiErrorBody;
+    throw new ApiRequestError(body.code ?? "UNKNOWN", body.message ?? res.statusText);
   }
   return data as T;
 }
@@ -114,6 +124,24 @@ export async function rejectOperation(id: string, opIndex: number): Promise<Proj
       body: JSON.stringify({ opIndex }),
     }),
   );
+}
+
+export async function previewOperationManifest(id: string, opIndex: number): Promise<PreviewManifest> {
+  const { manifest } = await parse<{ manifest: PreviewManifest }>(
+    await fetch(`/api/projects/${id}/preview/operation`, {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ opIndex }),
+    }),
+  );
+  return manifest;
+}
+
+export async function previewPlanManifest(id: string): Promise<PreviewManifest> {
+  const { manifest } = await parse<{ manifest: PreviewManifest }>(
+    await fetch(`/api/projects/${id}/preview/plan`, { method: "POST" }),
+  );
+  return manifest;
 }
 
 async function post(id: string, action: string): Promise<ProjectDTO> {

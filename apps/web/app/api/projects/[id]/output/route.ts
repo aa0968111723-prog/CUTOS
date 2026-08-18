@@ -9,7 +9,7 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
   try {
     const { store, storage } = getRuntime();
     const asset = store.getAssetByKind(ctx.params.id, "export");
-    if (!asset) return errorResponse(404, "No export has been rendered yet.");
+    if (!asset) return errorResponse(404, "EXPORT_FAILED", "No export has been rendered yet.");
     return await serveStorageObject(storage, asset.storageKey, req);
   } catch (error) {
     return handleError(error);

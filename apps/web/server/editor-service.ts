@@ -2,9 +2,13 @@ import { randomUUID } from "node:crypto";
 import { isPlanStale } from "@cutos/edit-dsl";
 import {
   TimelineHistory,
+  applyOperation,
+  applyPlan,
   timelineDurationMs,
+  UnsupportedOperationError,
 } from "@cutos/timeline";
 import { estimateImpact } from "@cutos/agent";
+import { compileTimelineToPreview, type PreviewManifest } from "@cutos/preview";
 import { probeMetadata, synthesizeSample } from "@cutos/media";
 import type { AnalysisSection } from "@cutos/media";
 import { config, isAllowedMime } from "./config.js";
@@ -19,7 +23,7 @@ async function importFromTemp(tempPath: string, name: string): Promise<string> {
   const { store, storage } = getRuntime();
   const meta = await probeMetadata(tempPath);
   if (!meta.hasVideo && !meta.hasAudio) {
-    throw new HttpError(400, "File has no video or audio stream.");
+    throw new HttpError(400, "MEDIA_UNSUPPORTED", "File has no video or audio stream.");
   }
 
   const projectId = randomUUID();
@@ -67,10 +71,10 @@ export async function importSample(): Promise<string> {
 
 export async function importUpload(file: File): Promise<string> {
   if (file.size > config.maxUploadBytes) {
-    throw new HttpError(413, `File exceeds the ${Math.round(config.maxUploadBytes / 1024 / 1024)}MB limit.`);
+    throw new HttpError(413, "UPLOAD_TOO_LARGE", `File exceeds the ${Math.round(config.maxUploadBytes / 1024 / 1024)}MB limit.`);
   }
   if (file.type && !isAllowedMime(file.type)) {
-    throw new HttpError(415, `Unsupported media type: ${file.type}`);
+    throw new HttpError(415, "MEDIA_UNSUPPORTED", `Unsupported media type: ${file.type}`);
   }
   const { storage } = getRuntime();
   await storage.ensureTempDir();
@@ -100,7 +104,7 @@ export function enqueueExport(projectId: string): string {
   const { store, jobStore } = getRuntime();
   const state = store.loadTimeline(projectId);
   if (!state || timelineDurationMs(state.current) <= 0) {
-    throw new HttpError(409, "Timeline is empty; nothing to export.");
+    throw new HttpError(409, "EMPTY_TIMELINE", "Timeline is empty; nothing to export.");
   }
   const job = jobStore.enqueue({ kind: "export", projectId, payload: { projectId }, maxAttempts: 2 });
   return job.id;
@@ -116,14 +120,14 @@ export async function plan(projectId: string, instruction: string) {
 function loadHistory(projectId: string): TimelineHistory {
   const { store } = getRuntime();
   const state = store.loadTimeline(projectId);
-  if (!state) throw new HttpError(404, "Timeline not found.");
+  if (!state) throw new HttpError(404, "TIMELINE_NOT_FOUND", "Timeline not found.");
   return TimelineHistory.restore(state);
 }
 
 export function rejectOperation(projectId: string, opIndex: number) {
   const { store } = getRuntime();
   const plan = store.loadPendingPlan(projectId);
-  if (!plan) throw new HttpError(409, "No pending plan to edit.");
+  if (!plan) throw new HttpError(409, "NO_PENDING_PLAN", "No pending plan to edit.");
   const operations = plan.operations.filter((_, i) => i !== opIndex);
   if (operations.length === 0) {
     store.savePendingPlan(projectId, null);
@@ -138,7 +142,7 @@ export function previewOperation(projectId: string, opIndex: number) {
   const project = store.requireProject(projectId);
   const plan = store.loadPendingPlan(projectId);
   const op = plan?.operations[opIndex];
-  if (!plan || !op) throw new HttpError(404, "Operation not found.");
+  if (!plan || !op) throw new HttpError(404, "OPERATION_NOT_FOUND", "Operation not found.");
   const single = { ...plan, operations: [op] };
   const impact = estimateImpact(single, project.source.durationMs);
   return {
@@ -147,6 +151,41 @@ export function previewOperation(projectId: string, opIndex: number) {
     estimatedDurationMs: impact.estimatedDurationMs,
     riskLevel: impact.riskLevel,
   };
+}
+
+/** Ephemeral preview manifest for one pending operation (never persisted). */
+export function previewOperationManifest(projectId: string, opIndex: number): PreviewManifest {
+  const { store } = getRuntime();
+  const plan = store.loadPendingPlan(projectId);
+  const op = plan?.operations[opIndex];
+  if (!plan || !op) throw new HttpError(404, "OPERATION_NOT_FOUND", "Operation not found.");
+  const history = loadHistory(projectId);
+  try {
+    const ephemeral = applyOperation(history.current, op);
+    return compileTimelineToPreview(ephemeral, { timelineRevision: history.revision });
+  } catch (error) {
+    if (error instanceof UnsupportedOperationError) {
+      throw new HttpError(422, "PREVIEW_UNSUPPORTED", error.message);
+    }
+    throw error;
+  }
+}
+
+/** Ephemeral preview manifest for the whole pending plan (never persisted). */
+export function previewPlanManifest(projectId: string): PreviewManifest {
+  const { store } = getRuntime();
+  const plan = store.loadPendingPlan(projectId);
+  if (!plan) throw new HttpError(409, "NO_PENDING_PLAN", "No pending plan to preview.");
+  const history = loadHistory(projectId);
+  try {
+    const ephemeral = applyPlan(history.current, plan);
+    return compileTimelineToPreview(ephemeral, { timelineRevision: history.revision });
+  } catch (error) {
+    if (error instanceof UnsupportedOperationError) {
+      throw new HttpError(422, "PREVIEW_UNSUPPORTED", error.message);
+    }
+    throw error;
+  }
 }
 
 export function discardPending(projectId: string) {
@@ -159,16 +198,20 @@ export function applyPending(projectId: string) {
   const { store, agentRunStore, agentRuntime } = getRuntime();
   const project = store.requireProject(projectId);
   const plan = store.loadPendingPlan(projectId);
-  if (!plan) throw new HttpError(409, "No pending plan to apply.");
+  if (!plan) throw new HttpError(409, "NO_PENDING_PLAN", "No pending plan to apply.");
 
   const history = loadHistory(projectId);
   if (isPlanStale(plan, history.revision)) {
-    throw new HttpError(409, "The plan is stale (the timeline changed). Please re-plan.");
+    throw new HttpError(409, "STALE_EDIT_PLAN", "The plan is stale (the timeline changed).");
   }
 
   const impact = estimateImpact(plan, project.source.durationMs);
   if (impact.unsupportedOperations.length > 0) {
-    throw new HttpError(422, `Plan contains operations not yet supported: ${impact.unsupportedOperations.join(", ")}`);
+    throw new HttpError(
+      422,
+      "UNSUPPORTED_OPERATION",
+      `Plan contains operations not yet supported: ${impact.unsupportedOperations.join(", ")}`,
+    );
   }
 
   const before = timelineDurationMs(history.current);
@@ -237,7 +280,7 @@ export function listProjects() {
 export function getJob(jobId: string) {
   const { jobStore } = getRuntime();
   const job = jobStore.get(jobId);
-  if (!job) throw new HttpError(404, "Job not found.");
+  if (!job) throw new HttpError(404, "JOB_NOT_FOUND", "Job not found.");
   return {
     id: job.id,
     kind: job.kind,

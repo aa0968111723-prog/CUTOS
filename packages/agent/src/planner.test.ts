@@ -38,6 +38,43 @@ describe("LocalHeuristicPlanner", () => {
   });
 });
 
+describe("LocalHeuristicPlanner (Traditional Chinese)", () => {
+  const planner = new LocalHeuristicPlanner();
+
+  it("understands 刪除停頓 (remove all pauses)", async () => {
+    const proposed = await planner.propose({ ...request, instruction: "刪除停頓" });
+    // No threshold → removes all three silences.
+    expect(proposed.operations).toHaveLength(3);
+    expect(proposed.summary).toContain("刪除");
+  });
+
+  it("understands 刪掉超過一秒的停頓 (threshold via CJK numeral)", async () => {
+    const proposed = await planner.propose({ ...request, instruction: "刪掉超過一秒的停頓" });
+    // Only the two 1.5s silences exceed 1s.
+    expect(proposed.operations).toHaveLength(2);
+  });
+
+  it("understands 兩倍速 (2x speed)", async () => {
+    const proposed = await planner.propose({ ...request, instruction: "把整支影片變成兩倍速" });
+    expect(proposed.operations).toContainEqual(expect.objectContaining({ type: "setSpeed", speed: 2 }));
+  });
+
+  it("understands 整支影片快一點 (faster)", async () => {
+    const proposed = await planner.propose({ ...request, instruction: "整支影片快一點" });
+    expect(proposed.operations).toContainEqual(expect.objectContaining({ type: "setSpeed", speed: 1.5 }));
+  });
+
+  it("understands 刪掉沒有內容的地方 (remove empty content)", async () => {
+    const proposed = await planner.propose({ ...request, instruction: "幫我刪掉沒有內容的地方" });
+    expect(proposed.operations.length).toBeGreaterThan(0);
+  });
+
+  it("produces zh-TW reasons on operations", async () => {
+    const proposed = await planner.propose({ ...request, instruction: "刪除停頓" });
+    expect(proposed.operations[0]).toMatchObject({ reason: expect.stringContaining("靜音停頓") });
+  });
+});
+
 describe("PlanGateway", () => {
   it("returns a validated Edit Plan for a valid request", async () => {
     const gateway = new PlanGateway(new LocalHeuristicPlanner(), deterministicOptions);

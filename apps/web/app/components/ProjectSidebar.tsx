@@ -2,14 +2,15 @@
 
 import type { Editor } from "../hooks/useEditor.js";
 import { formatSeconds } from "../lib/format.js";
+import { t } from "../i18n/index.js";
 
 export function ProjectSidebar({ editor }: { editor: Editor }) {
   return (
     <div className="card">
-      <h2>Projects</h2>
+      <h2>{t("sidebar.projects")}</h2>
       <div className="row" style={{ marginBottom: 10 }}>
         <button className="btn btn-sm" onClick={() => editor.closeProject()}>
-          + New / Import
+          {t("sidebar.new")}
         </button>
       </div>
       {editor.projects.map((p) => (
@@ -18,12 +19,12 @@ export function ProjectSidebar({ editor }: { editor: Editor }) {
             {p.name}
             <span className="muted"> · {formatSeconds(p.durationMs)}</span>
           </button>
-          <button className="btn btn-ghost btn-sm" onClick={() => void editor.removeProject(p.id)}>
+          <button className="btn btn-ghost btn-sm" onClick={() => void editor.removeProject(p.id)} aria-label={t("sidebar.delete")}>
             ✕
           </button>
         </div>
       ))}
-      {editor.projects.length === 0 && <p className="muted">No projects yet.</p>}
+      {editor.projects.length === 0 && <p className="muted">{t("home.noProjects")}</p>}
     </div>
   );
 }

@@ -11,6 +11,7 @@ const nextConfig = {
     "@cutos/jobs",
     "@cutos/storage",
     "@cutos/project-store",
+    "@cutos/preview",
   ],
   webpack: (config) => {
     // Allow explicit ".js" specifiers in TypeScript source to resolve to the

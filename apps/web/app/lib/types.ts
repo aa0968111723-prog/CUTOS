@@ -2,6 +2,9 @@
  * Serializable DTOs shared between the API routes and the client UI. Plain data
  * only (no domain logic, no Node imports) so they are safe in client components.
  */
+import type { PreviewManifest } from "@cutos/preview";
+
+export type { PreviewManifest };
 
 export interface OperationDTO {
   index: number;
@@ -72,6 +75,7 @@ export interface AgentStepDTO {
   kind: string;
   title: string;
   detail?: string;
+  data?: Record<string, string | number>;
 }
 
 export interface AgentRunDTO {
@@ -132,4 +136,6 @@ export interface ProjectDTO {
   agentRuns: AgentRunDTO[];
   hasExport: boolean;
   exportDurationMs?: number;
+  /** Self-contained plan for playing the edited timeline in the browser. */
+  preview: PreviewManifest;
 }
