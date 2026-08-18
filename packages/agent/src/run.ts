@@ -28,8 +28,11 @@ export type AgentStepKind =
 export interface AgentStep {
   at: number;
   kind: AgentStepKind;
+  /** English label for logs/debug; the UI localizes by `kind`. */
   title: string;
   detail?: string;
+  /** Structured, language-neutral data so the UI can compose localized copy. */
+  data?: Record<string, number | string>;
   toolCallId?: string;
 }
 

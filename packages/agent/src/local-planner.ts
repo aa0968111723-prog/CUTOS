@@ -1,46 +1,10 @@
 import { formatTimecode, msToSec } from "@cutos/edit-dsl";
 import type { Planner, PlanRequest, ProposedEdits, SilenceInterval } from "./types.js";
 
-const DURATION_RE =
-  /(\d+(?:\.\d+)?)\s*(ms|millisecond|milliseconds|s|sec|secs|second|seconds)/i;
-const SPEED_MULTIPLIER_RE = /(\d+(?:\.\d+)?)\s*x/i;
-
-function parseThresholdMs(instruction: string): number | null {
-  const match = DURATION_RE.exec(instruction);
-  if (!match?.[1] || !match[2]) {
-    return null;
-  }
-  const value = Number.parseFloat(match[1]);
-  const unit = match[2].toLowerCase();
-  return unit.startsWith("ms") || unit.startsWith("milli")
-    ? Math.round(value)
-    : Math.round(value * 1000);
-}
-
-function parseSpeed(instruction: string): number | null {
-  const text = instruction.toLowerCase();
-  const multiplier = SPEED_MULTIPLIER_RE.exec(text);
-  if (multiplier?.[1]) {
-    return Number.parseFloat(multiplier[1]);
-  }
-  if (/\bdouble\b/.test(text)) return 2;
-  if (/\bhalf\b|\bslow(?:er|\s*down)?\b/.test(text)) return 0.5;
-  if (/\bspeed\s*up\b|\bfaster\b|\bspeed\b/.test(text)) return 1.5;
-  return null;
-}
-
-function wantsPauseRemoval(instruction: string): boolean {
-  return /\b(pause|pauses|silence|silences|silent|quiet|dead\s*air|gap|gaps)\b/i.test(
-    instruction,
-  );
-}
-
 /**
- * Deterministic, offline planner. It maps common editing intents onto the Edit
- * DSL using the analysis context (detected silences). Being deterministic makes
- * it ideal as a default provider: no API key required, fully replayable, and
- * easy to test. It implements the same {@link Planner} contract as any hosted
- * model adapter.
+ * Deterministic, offline planner. Understands both English and Traditional
+ * Chinese (zh-TW) editing instructions and maps them onto the Edit DSL. Its
+ * user-facing `summary`/`reason` copy is zh-TW; the DSL schema stays English.
  */
 export class LocalHeuristicPlanner implements Planner {
   readonly name = "local-heuristic";
@@ -51,22 +15,17 @@ export class LocalHeuristicPlanner implements Planner {
 
     if (wantsPauseRemoval(request.instruction)) {
       const thresholdMs = parseThresholdMs(request.instruction) ?? 0;
-      const targets = request.silences.filter(
-        (s) => s.endMs - s.startMs >= thresholdMs,
-      );
-      for (const silence of targets) {
-        operations.push(buildRemoveRange(silence));
-      }
+      const targets = request.silences.filter((s) => s.endMs - s.startMs >= thresholdMs);
+      for (const silence of targets) operations.push(buildRemoveRange(silence));
       if (targets.length > 0) {
         const removedMs = targets.reduce((sum, s) => sum + (s.endMs - s.startMs), 0);
         summaries.push(
-          `Remove ${targets.length} pause${targets.length === 1 ? "" : "s"} ` +
-            `(${msToSec(removedMs).toFixed(1)}s total` +
-            (thresholdMs > 0 ? `, longer than ${msToSec(thresholdMs).toFixed(1)}s` : "") +
-            `).`,
+          `刪除 ${targets.length} 個停頓（共約 ${msToSec(removedMs).toFixed(1)} 秒` +
+            (thresholdMs > 0 ? `，長度超過 ${msToSec(thresholdMs).toFixed(1)} 秒` : "") +
+            `）。`,
         );
       } else {
-        summaries.push("No pauses matched the requested threshold.");
+        summaries.push("沒有符合條件的停頓可以刪除。");
       }
     }
 
@@ -77,13 +36,13 @@ export class LocalHeuristicPlanner implements Planner {
         startMs: 0,
         endMs: request.sourceDurationMs,
         speed,
-        reason: `Set overall playback speed to ${speed}x`,
+        reason: `將整體播放速度設為 ${speed}x`,
       });
-      summaries.push(`Set playback speed to ${speed}x.`);
+      summaries.push(`將整體速度調整為 ${speed}x。`);
     }
 
     return {
-      summary: summaries.join(" ") || "No actionable edits were derived from the request.",
+      summary: summaries.join(" ") || "我沒辦法從這個要求得出可執行的剪輯。",
       operations,
     };
   }
@@ -94,6 +53,96 @@ function buildRemoveRange(silence: SilenceInterval) {
     type: "removeRange",
     startMs: silence.startMs,
     endMs: silence.endMs,
-    reason: `Silent pause ${formatTimecode(silence.startMs)}–${formatTimecode(silence.endMs)}`,
+    reason: `靜音停頓 ${formatTimecode(silence.startMs)}–${formatTimecode(silence.endMs)}`,
   };
+}
+
+// --- intent parsing (English + zh-TW) ---
+
+const CJK_NUMERALS: Record<string, number> = {
+  零: 0,
+  一: 1,
+  二: 2,
+  兩: 2,
+  三: 3,
+  四: 4,
+  五: 5,
+  六: 6,
+  七: 7,
+  八: 8,
+  九: 9,
+  十: 10,
+};
+
+function parseNumberToken(token: string): number | null {
+  if (/^\d/.test(token)) {
+    const value = Number.parseFloat(token);
+    return Number.isFinite(value) ? value : null;
+  }
+  if (token.length === 1) return CJK_NUMERALS[token] ?? null;
+  if (token === "十") return 10;
+  // e.g. 十二 / 二十
+  if (token.startsWith("十")) {
+    const rest = CJK_NUMERALS[token.slice(1)] ?? 0;
+    return 10 + rest;
+  }
+  if (token.endsWith("十")) {
+    const tens = CJK_NUMERALS[token.slice(0, 1)] ?? 1;
+    return tens * 10;
+  }
+  return null;
+}
+
+const EN_DURATION_RE = /(\d+(?:\.\d+)?)\s*(ms|millisecond|milliseconds|s|sec|secs|second|seconds)\b/i;
+const ZH_DURATION_RE = /([零一二兩三四五六七八九十]+|\d+(?:\.\d+)?)\s*(毫秒|秒)/;
+
+function parseThresholdMs(instruction: string): number | null {
+  const en = EN_DURATION_RE.exec(instruction);
+  if (en?.[1] && en[2]) {
+    const value = Number.parseFloat(en[1]);
+    const unit = en[2].toLowerCase();
+    return unit.startsWith("ms") || unit.startsWith("milli") ? Math.round(value) : Math.round(value * 1000);
+  }
+  const zh = ZH_DURATION_RE.exec(instruction);
+  if (zh?.[1] && zh[2]) {
+    const value = parseNumberToken(zh[1]);
+    if (value === null) return null;
+    return zh[2] === "毫秒" ? Math.round(value) : Math.round(value * 1000);
+  }
+  return null;
+}
+
+const EN_SPEED_MULTIPLIER_RE = /(\d+(?:\.\d+)?)\s*x/i;
+const ZH_SPEED_MULTIPLIER_RE = /([零一二兩三四五六七八九十]+|\d+(?:\.\d+)?)\s*倍/;
+
+function parseSpeed(instruction: string): number | null {
+  const text = instruction.toLowerCase();
+
+  const enMul = EN_SPEED_MULTIPLIER_RE.exec(text);
+  if (enMul?.[1]) return Number.parseFloat(enMul[1]);
+
+  const zhMul = ZH_SPEED_MULTIPLIER_RE.exec(instruction);
+  if (zhMul?.[1]) {
+    const value = parseNumberToken(zhMul[1]);
+    if (value !== null && value > 0) return value;
+  }
+
+  if (/\bdouble\b/.test(text) || /雙倍|加倍/.test(instruction)) return 2;
+  if (/\bhalf\b|\bslow(?:er|\s*down)?\b/.test(text) || /放慢|慢一點|慢一些|變慢|減速|一半|慢速/.test(instruction)) {
+    return 0.5;
+  }
+  if (
+    /\bspeed\s*up\b|\bfaster\b|\bspeed\b/.test(text) ||
+    /加速|快一點|快一些|快點|更快|剪快|節奏.*快|速度.*快/.test(instruction)
+  ) {
+    return 1.5;
+  }
+  return null;
+}
+
+function wantsPauseRemoval(instruction: string): boolean {
+  if (/\b(pause|pauses|silence|silences|silent|quiet|dead\s*air|gap|gaps)\b/i.test(instruction)) {
+    return true;
+  }
+  return /停頓|空白|靜音|安靜|沉默|空檔|冷場|留白|沒有?聲音|沒聲音|沒有內容|沒內容/.test(instruction);
 }

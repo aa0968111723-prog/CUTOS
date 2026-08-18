@@ -69,6 +69,12 @@ export class AgentRuntime {
         "context",
         "Analyzed project context",
         `${Math.round(context.sourceDurationMs / 1000)}s source · ${context.silences.length} pauses · revision ${context.timelineRevision}`,
+        undefined,
+        {
+          seconds: Math.round(context.sourceDurationMs / 1000),
+          pauses: context.silences.length,
+          revision: context.timelineRevision,
+        },
       );
 
       const ctx: ToolContext = { runId: run.id, projectId: input.projectId, permissions: this.permissions };
@@ -94,6 +100,12 @@ export class AgentRuntime {
         "validate",
         "Validated plan",
         `${impact.operationCount} operation(s), est. ${Math.round(impact.estimatedDurationMs / 1000)}s (risk: ${impact.riskLevel})`,
+        undefined,
+        {
+          count: impact.operationCount,
+          seconds: Math.round(impact.estimatedDurationMs / 1000),
+          risk: impact.riskLevel,
+        },
       );
 
       const decision = this.approvalPolicy.evaluate(impact);
@@ -117,7 +129,14 @@ export class AgentRuntime {
   ): AgentRun | undefined {
     const run = this.deps.runStore.get(runId);
     if (!run) return undefined;
-    this.step(run, "execute", "Applied edit plan to the timeline", `duration ${args.beforeDurationMs}ms → ${args.afterDurationMs}ms`);
+    this.step(
+      run,
+      "execute",
+      "Applied edit plan to the timeline",
+      `duration ${args.beforeDurationMs}ms → ${args.afterDurationMs}ms`,
+      undefined,
+      { before: args.beforeDurationMs, after: args.afterDurationMs },
+    );
     const verify: VerifyResult = verifyEdit({
       beforeDurationMs: args.beforeDurationMs,
       afterDurationMs: args.afterDurationMs,
@@ -131,8 +150,15 @@ export class AgentRuntime {
     return run;
   }
 
-  private step(run: AgentRun, kind: AgentStepKind, title: string, detail?: string, toolCallId?: string): void {
-    run.steps.push({ at: this.now(), kind, title, detail, toolCallId });
+  private step(
+    run: AgentRun,
+    kind: AgentStepKind,
+    title: string,
+    detail?: string,
+    toolCallId?: string,
+    data?: Record<string, number | string>,
+  ): void {
+    run.steps.push({ at: this.now(), kind, title, detail, toolCallId, data });
     run.updatedAt = this.now();
   }
 
