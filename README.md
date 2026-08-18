@@ -57,3 +57,35 @@ The first reliable vertical slice is intentionally narrow:
 9. Export with FFmpeg.
 
 Advanced effects, collaboration, generative B-roll and plugin ecosystems should come after this path is reliable.
+
+## Monorepo layout
+
+```text
+packages/
+  edit-dsl/   Zod-validated, versioned Edit DSL (operations + Edit Plan)
+  timeline/   Non-destructive timeline engine (transforms + undo/redo history)
+  media/      FFmpeg/FFprobe adapters (probe, silence detection, deterministic export)
+  agent/      Model-agnostic planning gateway + deterministic + OpenAI-compatible adapters
+apps/
+  web/        Next.js agent-first UI + API routes (import → analyze → plan → apply → export)
+```
+
+## Development
+
+Requirements: Node.js >= 20, [pnpm](https://pnpm.io), and [FFmpeg](https://ffmpeg.org)
+(`ffmpeg` + `ffprobe`) on `PATH`.
+
+```bash
+pnpm install            # install workspace dependencies
+pnpm dev                # run the web app at http://localhost:3000
+pnpm test               # run unit + FFmpeg integration tests
+pnpm typecheck          # type-check every package
+pnpm lint               # lint the workspace
+pnpm build              # production build of the web app
+```
+
+The web app runs fully offline by default via the deterministic local planner. To route
+planning through an OpenAI-compatible endpoint instead, set `CUTOS_LLM_PROVIDER=openai`,
+`CUTOS_OPENAI_API_KEY`, and optionally `CUTOS_OPENAI_BASE_URL` / `CUTOS_OPENAI_MODEL`.
+Generated media (sources, samples, exports) is written under a git-ignored `.data/` directory
+and never overwrites original source media.
