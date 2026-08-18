@@ -75,6 +75,7 @@ export interface AgentStepDTO {
   kind: string;
   title: string;
   detail?: string;
+  data?: Record<string, string | number>;
 }
 
 export interface AgentRunDTO {

@@ -89,7 +89,7 @@ function toAgentRunDTO(run: AgentRun): AgentRunDTO {
     createdAt: run.createdAt,
     summary: run.summary,
     error: run.error,
-    steps: run.steps.map((s) => ({ at: s.at, kind: s.kind, title: s.title, detail: s.detail })),
+    steps: run.steps.map((s) => ({ at: s.at, kind: s.kind, title: s.title, detail: s.detail, data: s.data })),
   };
 }
 

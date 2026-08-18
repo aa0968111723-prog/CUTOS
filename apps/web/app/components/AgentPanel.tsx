@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import type { Editor } from "../hooks/useEditor.js";
+import { t } from "../i18n/index.js";
 
-const SUGGESTIONS = [
-  "Remove all silent pauses",
-  "Remove pauses longer than 1 second",
-  "Make the whole clip 2x faster",
+const SUGGESTIONS: string[] = [
+  t("suggestions.removeLongPauses"),
+  t("suggestions.removeOverOneSecond"),
+  t("suggestions.faster"),
 ];
 
 export function AgentPanel({ editor }: { editor: Editor }) {
@@ -20,7 +21,7 @@ export function AgentPanel({ editor }: { editor: Editor }) {
 
   return (
     <div className="card chat">
-      <h2>CUTOS Agent</h2>
+      <h2>{t("agent.title")}</h2>
       {editor.messages.map((m, i) => (
         <div key={i} className={`msg ${m.role}`}>
           {m.text}
@@ -34,15 +35,20 @@ export function AgentPanel({ editor }: { editor: Editor }) {
       <div className="composer">
         <input
           value={instruction}
-          placeholder="Describe an edit…"
+          placeholder={t("agent.placeholder")}
+          aria-label={t("agent.placeholder")}
           onChange={(e) => setInstruction(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter" && instruction.trim()) send(instruction);
           }}
           disabled={disabled}
         />
-        <button className="btn btn-primary" onClick={() => instruction.trim() && send(instruction)} disabled={disabled || !instruction.trim()}>
-          Send
+        <button
+          className="btn btn-primary"
+          onClick={() => instruction.trim() && send(instruction)}
+          disabled={disabled || !instruction.trim()}
+        >
+          {t("agent.send")}
         </button>
       </div>
       <div className="suggestions">

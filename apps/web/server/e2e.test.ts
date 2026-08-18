@@ -62,10 +62,17 @@ describe("editor service E2E (ffmpeg + durable store)", () => {
     expect(analyzed.analysis?.silences.length ?? 0).toBeGreaterThanOrEqual(3);
     expect(analyzed.analysis?.hasWaveform).toBe(true);
 
-    // Plan
-    const planned = await service.plan(projectId, "remove pauses longer than 1 second");
+    // Plan (Traditional Chinese instruction)
+    const planned = await service.plan(projectId, "刪掉超過 1 秒的停頓");
     expect(planned.dto.pendingPlan?.operations.length).toBeGreaterThanOrEqual(3);
     const opCount = planned.dto.pendingPlan!.operations.length;
+    // Agent summary is zh-TW.
+    expect(planned.dto.pendingPlan?.summary).toContain("刪除");
+
+    // Ephemeral operation preview must not mutate the timeline.
+    const opPreview = service.previewOperationManifest(projectId, 0);
+    expect(opPreview.durationMs).toBeLessThan(planned.dto.source.durationMs);
+    expect(service.getProject(projectId).timeline.durationMs).toBe(planned.dto.source.durationMs);
 
     // Reject one operation (operation-level review)
     const afterReject = service.rejectOperation(projectId, 0);
@@ -77,11 +84,17 @@ describe("editor service E2E (ffmpeg + durable store)", () => {
     expect(applied.pendingPlan).toBeUndefined();
     const editedDuration = applied.timeline.durationMs;
 
-    // Undo / redo
+    // Preview manifest is embedded and matches the edited timeline (parity).
+    expect(applied.preview.durationMs).toBe(applied.timeline.durationMs);
+    expect(applied.preview.segments.length).toBe(applied.timeline.clips.length);
+
+    // Undo / redo — preview updates instantly with the timeline.
     const undone = service.undo(projectId);
     expect(undone.timeline.durationMs).toBe(undone.source.durationMs);
+    expect(undone.preview.durationMs).toBe(undone.source.durationMs);
     const redone = service.redo(projectId);
     expect(redone.timeline.durationMs).toBe(editedDuration);
+    expect(redone.preview.durationMs).toBe(editedDuration);
 
     // Export (durable job → worker → stored asset)
     await waitForJob(service.enqueueExport(projectId));
