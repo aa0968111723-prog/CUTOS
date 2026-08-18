@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { AiosPlanner } from "./aios-planner.js";
+import { checkAiosConnection } from "./aios-health.js";
 import { createPlanner, describeProvider, readAiosConfig } from "./factory.js";
 import type { PlanRequest } from "./types.js";
 
@@ -121,5 +122,35 @@ describe("createPlanner / describeProvider (AIOS)", () => {
     const info = describeProvider({} as NodeJS.ProcessEnv);
     expect(info.provider).toBe("local");
     expect(info.name).toBe("local-heuristic");
+  });
+
+  it("reads a configurable health path", () => {
+    const env = { CUTOS_AIOS_HEALTH_PATH: "/status" } as unknown as NodeJS.ProcessEnv;
+    expect(readAiosConfig(env).healthPath).toBe("/status");
+  });
+});
+
+describe("checkAiosConnection", () => {
+  it("reports reachable + latency when the kernel responds (even 404)", async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: false, status: 404 })) as unknown as typeof fetch;
+    const status = await checkAiosConnection({ kernelUrl: "http://localhost:8000", fetchImpl });
+    expect(status.reachable).toBe(true);
+    expect(status.status).toBe(404);
+    expect(status.endpoint).toBe("http://localhost:8000/health");
+    expect(typeof status.latencyMs).toBe("number");
+  });
+
+  it("reports unreachable on a network error", async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error("ECONNREFUSED");
+    }) as unknown as typeof fetch;
+    const status = await checkAiosConnection({
+      kernelUrl: "http://localhost:8000/",
+      healthPath: "status",
+      fetchImpl,
+    });
+    expect(status.reachable).toBe(false);
+    expect(status.endpoint).toBe("http://localhost:8000/status");
+    expect(status.error).toContain("ECONNREFUSED");
   });
 });
