@@ -326,7 +326,7 @@ export default function Page() {
                     <li key={i}>
                       <span className="pill">{op.type}</span>
                       <span>
-                        {formatMs(op.startMs)}–{formatMs(op.endMs)}
+                        {formatMs(op.startMs ?? op.atMs ?? 0)}–{formatMs(op.endMs ?? op.atMs ?? 0)}
                         {op.speed ? ` · ${op.speed}x` : ""}
                         {op.reason ? ` · ${op.reason}` : ""}
                       </span>

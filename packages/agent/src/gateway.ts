@@ -45,6 +45,8 @@ export class PlanGateway {
       instruction: request.instruction,
       summary: proposed.summary,
       provider: this.planner.name,
+      createdBy: this.planner.name,
+      targetRevision: request.targetRevision ?? 0,
       operations: proposed.operations,
     };
     return validateEditPlan(envelope, { sourceDurationMs: request.sourceDurationMs });

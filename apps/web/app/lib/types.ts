@@ -5,9 +5,10 @@
  */
 
 export interface OperationDTO {
-  type: "removeRange" | "setSpeed";
-  startMs: number;
-  endMs: number;
+  type: string;
+  startMs?: number;
+  endMs?: number;
+  atMs?: number;
   speed?: number;
   reason?: string;
 }

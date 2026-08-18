@@ -5,10 +5,14 @@ import type { OperationDTO, PendingPlanDTO, ProjectDTO } from "../app/lib/types.
 import type { ProjectRecord } from "./store.js";
 
 function toOperationDTO(op: EditPlan["operations"][number]): OperationDTO {
+  const raw = op as Record<string, unknown>;
+  const num = (key: string): number | undefined =>
+    typeof raw[key] === "number" ? (raw[key] as number) : undefined;
   return {
     type: op.type,
-    startMs: op.startMs,
-    endMs: op.endMs,
+    startMs: num("startMs"),
+    endMs: num("endMs"),
+    atMs: num("atMs"),
     speed: op.type === "setSpeed" ? op.speed : undefined,
     reason: op.reason,
   };

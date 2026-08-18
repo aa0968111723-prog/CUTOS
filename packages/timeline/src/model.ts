@@ -33,10 +33,30 @@ export const TrackSchema = z.object({
 });
 export type Track = z.infer<typeof TrackSchema>;
 
+/** A timed caption anchored to source coordinates. */
+export const CaptionSchema = z.object({
+  id: z.string().min(1),
+  startMs: TimeMsSchema,
+  endMs: TimeMsSchema,
+  text: z.string().min(1),
+});
+export type Caption = z.infer<typeof CaptionSchema>;
+
+/** A point marker anchored to source coordinates. */
+export const MarkerSchema = z.object({
+  id: z.string().min(1),
+  atMs: TimeMsSchema,
+  label: z.string().min(1),
+});
+export type Marker = z.infer<typeof MarkerSchema>;
+
 export const TimelineSchema = z.object({
   id: z.string().min(1),
   source: SourceMediaSchema,
   track: TrackSchema,
+  /** Optional annotation layers (kept optional for backward compatibility). */
+  captions: z.array(CaptionSchema).optional(),
+  markers: z.array(MarkerSchema).optional(),
 });
 export type Timeline = z.infer<typeof TimelineSchema>;
 

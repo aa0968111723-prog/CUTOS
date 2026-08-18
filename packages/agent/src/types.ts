@@ -8,6 +8,8 @@ export interface PlanRequest {
   instruction: string;
   sourceDurationMs: number;
   silences: SilenceInterval[];
+  /** Timeline revision the resulting plan should target (stale-plan safety). */
+  targetRevision?: number;
 }
 
 /**
