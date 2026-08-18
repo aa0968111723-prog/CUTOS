@@ -1,0 +1,11 @@
+{
+  "name": "CUTOS",
+  "install": "pnpm install --frozen-lockfile",
+  "terminals": [
+    {
+      "name": "web",
+      "command": "pnpm dev"
+    }
+  ],
+  "ports": [3000]
+}
