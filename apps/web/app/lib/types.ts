@@ -1,15 +1,21 @@
 /**
- * Serializable DTOs shared between the API routes and the client UI. These are
- * plain data (no domain logic, no Node imports) so they can be imported safely
- * into client components.
+ * Serializable DTOs shared between the API routes and the client UI. Plain data
+ * only (no domain logic, no Node imports) so they are safe in client components.
  */
 
 export interface OperationDTO {
-  type: "removeRange" | "setSpeed";
-  startMs: number;
-  endMs: number;
+  index: number;
+  type: string;
+  startMs?: number;
+  endMs?: number;
+  atMs?: number;
   speed?: number;
   reason?: string;
+  confidence?: number;
+  /** Estimated duration removed by this single operation (ms). */
+  estimatedRemovedMs: number;
+  /** Whether the timeline engine can currently apply this operation. */
+  supported: boolean;
 }
 
 export interface ClipDTO {
@@ -20,12 +26,27 @@ export interface ClipDTO {
   outputDurationMs: number;
 }
 
-export interface AppliedPlanDTO {
+export interface CaptionDTO {
   id: string;
-  instruction: string;
-  summary: string;
-  provider: string;
+  startMs: number;
+  endMs: number;
+  text: string;
+}
+
+export interface MarkerDTO {
+  id: string;
+  atMs: number;
+  label: string;
+}
+
+export interface ImpactDTO {
+  sourceDurationMs: number;
+  estimatedDurationMs: number;
+  removedMs: number;
+  addedMs: number;
   operationCount: number;
+  riskLevel: "low" | "medium" | "high";
+  unsupportedOperations: string[];
 }
 
 export interface PendingPlanDTO {
@@ -33,7 +54,12 @@ export interface PendingPlanDTO {
   instruction: string;
   summary: string;
   provider: string;
+  targetRevision?: number;
+  stale: boolean;
   operations: OperationDTO[];
+  impact: ImpactDTO;
+  requiresApproval: boolean;
+  approvalReason: string;
 }
 
 export interface SilenceDTO {
@@ -41,10 +67,47 @@ export interface SilenceDTO {
   endMs: number;
 }
 
+export interface AgentStepDTO {
+  at: number;
+  kind: string;
+  title: string;
+  detail?: string;
+}
+
+export interface AgentRunDTO {
+  id: string;
+  input: string;
+  status: string;
+  createdAt: number;
+  steps: AgentStepDTO[];
+  summary: string | null;
+  error: string | null;
+}
+
+export interface OperationLogDTO {
+  id: string;
+  at: number;
+  revision: number;
+  kind: string;
+  summary: string | null;
+  operationCount: number;
+}
+
+export interface ProjectSummaryDTO {
+  id: string;
+  name: string;
+  updatedAt: number;
+  timelineRevision: number;
+  durationMs: number;
+}
+
 export interface ProjectDTO {
   id: string;
   name: string;
+  version: number;
+  updatedAt: number;
   provider: string;
+  timelineRevision: number;
   source: {
     durationMs: number;
     hasAudio: boolean;
@@ -52,19 +115,21 @@ export interface ProjectDTO {
     height: number | null;
   };
   analysis?: {
-    thresholdDb: number;
-    minSilenceMs: number;
     silences: SilenceDTO[];
+    hasWaveform: boolean;
+    sentenceCount: number;
   };
   timeline: {
     durationMs: number;
     clips: ClipDTO[];
+    captions: CaptionDTO[];
+    markers: MarkerDTO[];
   };
-  appliedPlans: AppliedPlanDTO[];
+  operationLog: OperationLogDTO[];
   canUndo: boolean;
   canRedo: boolean;
   pendingPlan?: PendingPlanDTO;
-  output?: {
-    durationMs: number;
-  };
+  agentRuns: AgentRunDTO[];
+  hasExport: boolean;
+  exportDurationMs?: number;
 }

@@ -42,3 +42,26 @@ export function ffmpeg(args: string[]): Promise<RunResult> {
 export function ffprobe(args: string[]): Promise<RunResult> {
   return run(FFPROBE_BIN, ["-hide_banner", ...args]);
 }
+
+/**
+ * Run FFmpeg and capture stdout as raw bytes (for piping decoded PCM/frames).
+ * stderr is captured as text for error reporting.
+ */
+export function ffmpegBinary(args: string[]): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(FFMPEG_BIN, ["-hide_banner", "-nostdin", ...args], {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    const chunks: Buffer[] = [];
+    let stderr = "";
+    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+    });
+    child.on("error", (error) => reject(error));
+    child.on("close", (code) => {
+      if (code === 0) resolve(Buffer.concat(chunks));
+      else reject(new Error(`ffmpeg exited with code ${code}\n${stderr.slice(-2000)}`));
+    });
+  });
+}

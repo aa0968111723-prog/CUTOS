@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@cutos/edit-dsl": "workspace:*",
-    "@cutos/timeline": "workspace:*"
+    "@cutos/timeline": "workspace:*",
+    "zod": "^3.23.8"
   }
 }

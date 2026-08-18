@@ -1,4 +1,4 @@
-import type { ProjectDTO } from "./types.js";
+import type { ProjectDTO, ProjectSummaryDTO } from "./types.js";
 
 export interface ApiError {
   error: string;
@@ -15,6 +15,8 @@ async function parse<T>(res: Response): Promise<T> {
   return data as T;
 }
 
+const jsonHeaders = { "content-type": "application/json" };
+
 export async function createSampleProject(): Promise<ProjectDTO> {
   return parse(await fetch("/api/projects/sample", { method: "POST" }));
 }
@@ -29,25 +31,34 @@ export async function getProject(id: string): Promise<ProjectDTO> {
   return parse(await fetch(`/api/projects/${id}`, { cache: "no-store" }));
 }
 
-interface JobResponse {
-  jobId: string;
+export async function listProjects(): Promise<ProjectSummaryDTO[]> {
+  const { projects } = await parse<{ projects: ProjectSummaryDTO[] }>(
+    await fetch("/api/projects", { cache: "no-store" }),
+  );
+  return projects;
 }
 
-export interface JobRecord {
+export async function deleteProject(id: string): Promise<void> {
+  await parse(await fetch(`/api/projects/${id}`, { method: "DELETE" }));
+}
+
+export interface JobDTO {
   id: string;
   kind: string;
-  status: "running" | "succeeded" | "failed";
-  error?: string;
+  status: "queued" | "running" | "succeeded" | "failed" | "cancelled";
+  progress: number;
+  stage: string | null;
+  error: string | null;
 }
 
 export async function startAnalyze(
   id: string,
   opts?: { thresholdDb?: number; minSilenceMs?: number },
 ): Promise<string> {
-  const { jobId } = await parse<JobResponse>(
+  const { jobId } = await parse<{ jobId: string }>(
     await fetch(`/api/projects/${id}/analyze`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: jsonHeaders,
       body: JSON.stringify(opts ?? {}),
     }),
   );
@@ -55,22 +66,52 @@ export async function startAnalyze(
 }
 
 export async function startExport(id: string): Promise<string> {
-  const { jobId } = await parse<JobResponse>(
+  const { jobId } = await parse<{ jobId: string }>(
     await fetch(`/api/projects/${id}/export`, { method: "POST" }),
   );
   return jobId;
 }
 
-export async function getJob(id: string): Promise<JobRecord> {
+export async function getJob(id: string): Promise<JobDTO> {
   return parse(await fetch(`/api/jobs/${id}`, { cache: "no-store" }));
 }
 
-export async function requestPlan(id: string, instruction: string): Promise<ProjectDTO> {
+export async function requestPlan(
+  id: string,
+  instruction: string,
+): Promise<{ runId: string; status: string; dto: ProjectDTO }> {
   return parse(
     await fetch(`/api/projects/${id}/plan`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: jsonHeaders,
       body: JSON.stringify({ instruction }),
+    }),
+  );
+}
+
+export interface PreviewResult {
+  opIndex: number;
+  removedMs: number;
+  estimatedDurationMs: number;
+  riskLevel: string;
+}
+
+export async function previewOperation(id: string, opIndex: number): Promise<PreviewResult> {
+  return parse(
+    await fetch(`/api/projects/${id}/review/preview`, {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ opIndex }),
+    }),
+  );
+}
+
+export async function rejectOperation(id: string, opIndex: number): Promise<ProjectDTO> {
+  return parse(
+    await fetch(`/api/projects/${id}/review/reject`, {
+      method: "POST",
+      headers: jsonHeaders,
+      body: JSON.stringify({ opIndex }),
     }),
   );
 }
@@ -84,12 +125,15 @@ export const discardPlan = (id: string) => post(id, "discard");
 export const undo = (id: string) => post(id, "undo");
 export const redo = (id: string) => post(id, "redo");
 
-/** Poll a job until it finishes. */
-export async function waitForJob(jobId: string, signal?: AbortSignal): Promise<JobRecord> {
+/** Poll a job until it finishes, reporting progress. */
+export async function waitForJob(
+  jobId: string,
+  onProgress?: (job: JobDTO) => void,
+): Promise<JobDTO> {
   for (;;) {
-    if (signal?.aborted) throw new Error("cancelled");
     const job = await getJob(jobId);
-    if (job.status !== "running") return job;
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    onProgress?.(job);
+    if (job.status !== "running" && job.status !== "queued") return job;
+    await new Promise((resolve) => setTimeout(resolve, 400));
   }
 }

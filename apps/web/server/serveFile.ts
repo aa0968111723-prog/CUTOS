@@ -1,15 +1,17 @@
-import { createReadStream } from "node:fs";
-import { stat } from "node:fs/promises";
-import type { ReadableOptions } from "node:stream";
 import { Readable } from "node:stream";
+import type { StorageAdapter } from "@cutos/storage";
 
 /**
- * Serve a media file with HTTP Range support so the browser <video> element can
- * seek. Source media is served read-only; it is never modified.
+ * Serve a storage object with HTTP Range support so the browser <video> element
+ * can seek. Objects are served read-only via the storage adapter (never a raw
+ * absolute path from the client).
  */
-export async function serveFile(filePath: string, req: Request): Promise<Response> {
-  const stats = await stat(filePath);
-  const total = stats.size;
+export async function serveStorageObject(
+  storage: StorageAdapter,
+  key: string,
+  req: Request,
+): Promise<Response> {
+  const { size } = await storage.stat(key);
   const range = req.headers.get("range");
 
   const baseHeaders: Record<string, string> = {
@@ -22,28 +24,23 @@ export async function serveFile(filePath: string, req: Request): Promise<Respons
     const match = /bytes=(\d+)-(\d*)/.exec(range);
     if (match) {
       const start = Number.parseInt(match[1] ?? "0", 10);
-      const end = match[2] ? Number.parseInt(match[2], 10) : total - 1;
-      const safeEnd = Math.min(end, total - 1);
-      const chunkSize = safeEnd - start + 1;
-      const stream = createReadStream(filePath, { start, end: safeEnd });
-      return new Response(toWebStream(stream), {
+      const end = match[2] ? Number.parseInt(match[2], 10) : size - 1;
+      const safeEnd = Math.min(end, size - 1);
+      const stream = storage.createReadStream(key, { start, end: safeEnd });
+      return new Response(Readable.toWeb(stream) as unknown as ReadableStream, {
         status: 206,
         headers: {
           ...baseHeaders,
-          "content-range": `bytes ${start}-${safeEnd}/${total}`,
-          "content-length": String(chunkSize),
+          "content-range": `bytes ${start}-${safeEnd}/${size}`,
+          "content-length": String(safeEnd - start + 1),
         },
       });
     }
   }
 
-  const stream = createReadStream(filePath);
-  return new Response(toWebStream(stream), {
+  const stream = storage.createReadStream(key);
+  return new Response(Readable.toWeb(stream) as unknown as ReadableStream, {
     status: 200,
-    headers: { ...baseHeaders, "content-length": String(total) },
+    headers: { ...baseHeaders, "content-length": String(size) },
   });
-}
-
-function toWebStream(stream: Readable, _opts?: ReadableOptions): ReadableStream {
-  return Readable.toWeb(stream) as unknown as ReadableStream;
 }
