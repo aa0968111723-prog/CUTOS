@@ -5,3 +5,6 @@ export * from "./export.js";
 export * from "./sample.js";
 export * from "./asset.js";
 export * from "./analysis.js";
+export * from "./waveform.js";
+export * from "./transcription.js";
+export * from "./analysis-runner.js";
