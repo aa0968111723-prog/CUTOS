@@ -5,7 +5,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { EDIT_DSL_VERSION, type EditPlan } from "@cutos/edit-dsl";
 import { applyPlan, createTimeline, type SourceMedia } from "@cutos/timeline";
 import { ANALYSIS_VERSION, type MediaAsset, type VideoAnalysis } from "@cutos/media";
-import { ProjectStore } from "./facade.js";
+import type { ProjectStore } from "./facade.js";
 import { createMemoryProjectStore } from "./memory.js";
 import { createSqliteProjectStore, SqliteProjectStore } from "./sqlite.js";
 import { ConcurrencyError, type PersistedTimelineState } from "./types.js";

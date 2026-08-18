@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { EditPlanSchema } from "@cutos/edit-dsl";
 import { SourceMediaSchema, TimelineSchema } from "@cutos/timeline";
-import { MediaAssetSchema, VideoAnalysisSchema } from "@cutos/media";
+import type { MediaAssetSchema, VideoAnalysisSchema } from "@cutos/media";
 
 /** Bump when the persisted shape changes; migrations key off this. */
 export const CURRENT_SCHEMA_VERSION = 1 as const;

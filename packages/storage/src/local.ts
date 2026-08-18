@@ -3,7 +3,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
 import { copyFile, mkdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
-import { Readable } from "node:stream";
+import type { Readable } from "node:stream";
 import {
   StorageObjectNotFoundError,
   assertValidKey,
