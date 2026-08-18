@@ -1,17 +1,22 @@
 :root {
-  --bg: #0b0f17;
-  --panel: #141a26;
-  --panel-2: #1b2230;
-  --border: #26303f;
-  --text: #e7ecf3;
-  --muted: #93a1b5;
-  --accent: #6ea8fe;
-  --accent-strong: #3b82f6;
-  --success: #34d399;
-  --danger: #f87171;
-  --warn: #fbbf24;
-  --radius: 14px;
-  --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  /* Bright, AIOS-like light theme. */
+  --bg: #f4f7fc;
+  --panel: #ffffff;
+  --panel-2: #eef2f9;
+  --border: #e2e8f2;
+  --text: #0f172a;
+  --muted: #64748b;
+  --accent: #3b82f6;
+  --accent-strong: #2563eb;
+  --brand-1: #2563eb;
+  --brand-2: #7c3aed;
+  --success: #059669;
+  --danger: #dc2626;
+  --warn: #d97706;
+  --radius: 16px;
+  --shadow: 0 10px 30px rgba(15, 23, 42, 0.08);
+  --shadow-sm: 0 2px 8px rgba(15, 23, 42, 0.06);
+  color-scheme: light;
 }
 
 * {
@@ -22,10 +27,14 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background: radial-gradient(1200px 800px at 80% -10%, #16233b 0%, var(--bg) 55%);
+  background:
+    radial-gradient(1100px 700px at 88% -12%, rgba(124, 58, 237, 0.12) 0%, transparent 55%),
+    radial-gradient(1000px 700px at 6% -6%, rgba(37, 99, 235, 0.14) 0%, transparent 50%),
+    var(--bg);
+  background-attachment: fixed;
   color: var(--text);
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial,
-    sans-serif;
+    "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
   min-height: 100vh;
 }
 
@@ -50,9 +59,14 @@ button {
 }
 
 .brand h1 {
-  font-size: 22px;
+  font-size: 24px;
   margin: 0;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.3px;
+  font-weight: 800;
+  background: linear-gradient(90deg, var(--brand-1), var(--brand-2));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 .brand .tag {
@@ -263,10 +277,10 @@ button {
   border-radius: 10px;
   background: repeating-linear-gradient(
     90deg,
-    #10161f,
-    #10161f 1px,
-    transparent 1px,
-    transparent 40px
+    #dbe3ef,
+    #dbe3ef 1px,
+    #eef2f9 1px,
+    #eef2f9 40px
   );
   border: 1px solid var(--border);
   overflow: hidden;
@@ -644,7 +658,35 @@ button {
   top: -2px;
   bottom: -2px;
   width: 2px;
-  background: #fff;
-  box-shadow: 0 0 6px rgba(255, 255, 255, 0.6);
+  background: var(--text);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.7);
   pointer-events: none;
+}
+
+/* AI-OS panel */
+.aios-panel {
+  border: 1px solid var(--border);
+  background:
+    linear-gradient(180deg, rgba(37, 99, 235, 0.06), rgba(124, 58, 237, 0.04)),
+    var(--panel);
+}
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.status-dot.ok {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.18);
+}
+.status-dot.off {
+  background: #94a3b8;
+}
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  word-break: break-all;
 }

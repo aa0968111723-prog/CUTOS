@@ -15,6 +15,7 @@ import { AgentPanel } from "./AgentPanel.js";
 import { AgentActivity } from "./AgentActivity.js";
 import { EditReviewPanel } from "./EditReviewPanel.js";
 import { InspectorPanel } from "./InspectorPanel.js";
+import { AiosPanel } from "./AiosPanel.js";
 import { ExportPanel } from "./ExportPanel.js";
 import { JobCenter } from "./JobCenter.js";
 
@@ -90,6 +91,7 @@ function WorkspaceInner({ editor, project }: { editor: Editor; project: ProjectD
 
         <aside className="ws-side">
           <ProjectSidebar editor={editor} />
+          <AiosPanel integration={project.integration} />
           <InspectorPanel project={project} />
         </aside>
       </div>

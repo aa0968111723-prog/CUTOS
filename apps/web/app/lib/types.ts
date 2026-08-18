@@ -138,4 +138,16 @@ export interface ProjectDTO {
   exportDurationMs?: number;
   /** Self-contained plan for playing the edited timeline in the browser. */
   preview: PreviewManifest;
+  integration: IntegrationDTO;
+}
+
+export interface IntegrationDTO {
+  provider: "local" | "openai" | "aios";
+  providerName: string;
+  aios: {
+    configured: boolean;
+    kernelUrl?: string;
+    model: string;
+    backend: string;
+  };
 }

@@ -168,6 +168,19 @@ export const zhTW = {
 
   "unit.seconds": "{value} 秒",
 
+  "aios.title": "AI‑OS 連結",
+  "aios.provider": "規劃器",
+  "aios.providerLocal": "內建規劃器（離線）",
+  "aios.providerOpenai": "OpenAI 相容",
+  "aios.providerAios": "AI‑OS Kernel",
+  "aios.status": "連線狀態",
+  "aios.connected": "已連結 AI‑OS Kernel",
+  "aios.notConnected": "尚未連結（使用內建規劃器）",
+  "aios.kernel": "Kernel 位址",
+  "aios.model": "模型",
+  "aios.bridge": "已將剪輯能力開放給 AI‑OS 代理，可雙向操作。",
+  "aios.manifest": "查看能力清單",
+
   "error.PROJECT_NOT_FOUND": "找不到這個專案。",
   "error.TIMELINE_NOT_FOUND": "找不到這個專案的時間軸。",
   "error.MEDIA_UNSUPPORTED": "目前不支援這個影片格式。",

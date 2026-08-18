@@ -1,4 +1,9 @@
 import type { Planner, PlanRequest, ProposedEdits } from "./types.js";
+import {
+  PLANNING_SYSTEM_PROMPT,
+  buildPlanningUserContent,
+  parseProposedEdits,
+} from "./planning-prompt.js";
 
 export interface OpenAICompatibleOptions {
   baseUrl: string;
@@ -7,16 +12,6 @@ export interface OpenAICompatibleOptions {
   /** Injectable for testing. Defaults to global fetch. */
   fetchImpl?: typeof fetch;
 }
-
-const SYSTEM_PROMPT = `You are the planning engine for CUTOS, an agent-first video editor.
-Convert the user's request into edit operations for a non-destructive timeline.
-Only respond with a JSON object of the form:
-{"summary": string, "operations": Operation[]}
-where Operation is one of:
-  {"type":"removeRange","startMs":int,"endMs":int,"reason"?:string}
-  {"type":"setSpeed","startMs":int,"endMs":int,"speed":number,"reason"?:string}
-All times are integer milliseconds in the ORIGINAL source. Never exceed the source duration.
-Use the provided detected silence intervals when removing pauses. Do not include prose outside the JSON.`;
 
 interface ChatCompletionResponse {
   choices?: { message?: { content?: string } }[];
@@ -41,12 +36,6 @@ export class OpenAICompatiblePlanner implements Planner {
   }
 
   async propose(request: PlanRequest): Promise<ProposedEdits> {
-    const userContent = JSON.stringify({
-      instruction: request.instruction,
-      sourceDurationMs: request.sourceDurationMs,
-      silences: request.silences,
-    });
-
     const response = await this.fetchImpl(`${this.options.baseUrl}/chat/completions`, {
       method: "POST",
       headers: {
@@ -58,8 +47,8 @@ export class OpenAICompatiblePlanner implements Planner {
         temperature: 0,
         response_format: { type: "json_object" },
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
-          { role: "user", content: userContent },
+          { role: "system", content: PLANNING_SYSTEM_PROMPT },
+          { role: "user", content: buildPlanningUserContent(request) },
         ],
       }),
     });
@@ -73,11 +62,6 @@ export class OpenAICompatiblePlanner implements Planner {
     if (!content) {
       throw new Error("Provider returned an empty completion.");
     }
-
-    const parsed = JSON.parse(content) as ProposedEdits;
-    return {
-      summary: typeof parsed.summary === "string" ? parsed.summary : "Proposed edits",
-      operations: Array.isArray(parsed.operations) ? parsed.operations : [],
-    };
+    return parseProposedEdits(content);
   }
 }
