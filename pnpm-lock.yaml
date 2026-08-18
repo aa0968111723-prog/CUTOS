@@ -92,6 +92,21 @@ importers:
       '@cutos/edit-dsl':
         specifier: workspace:*
         version: link:../edit-dsl
+      '@cutos/preview':
+        specifier: workspace:*
+        version: link:../preview
+      '@cutos/timeline':
+        specifier: workspace:*
+        version: link:../timeline
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+
+  packages/preview:
+    dependencies:
+      '@cutos/edit-dsl':
+        specifier: workspace:*
+        version: link:../edit-dsl
       '@cutos/timeline':
         specifier: workspace:*
         version: link:../timeline

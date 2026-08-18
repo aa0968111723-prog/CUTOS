@@ -1,4 +1,5 @@
-import { clipOutputDurationMs, timelineDurationMs, type Clip, type Timeline } from "@cutos/timeline";
+import { type Timeline } from "@cutos/timeline";
+import { compileSegments, previewDurationMs, type PreviewSegment } from "@cutos/preview";
 import { ffmpeg } from "./ffmpeg.js";
 
 export interface ExportParams {
@@ -43,30 +44,30 @@ interface FilterGraph {
   audioLabel: string | null;
 }
 
-function buildFilterGraph(clips: Clip[], hasAudio: boolean): FilterGraph {
+function buildFilterGraph(segments: PreviewSegment[], hasAudio: boolean): FilterGraph {
   const parts: string[] = [];
   const videoLabels: string[] = [];
   const audioLabels: string[] = [];
 
-  clips.forEach((clip, i) => {
-    const start = sec(clip.sourceInMs);
-    const end = sec(clip.sourceOutMs);
+  segments.forEach((segment, i) => {
+    const start = sec(segment.sourceInMs);
+    const end = sec(segment.sourceOutMs);
     const v = `v${i}`;
     parts.push(
-      `[0:v]trim=start=${start}:end=${end},setpts=(PTS-STARTPTS)/${clip.speed}[${v}]`,
+      `[0:v]trim=start=${start}:end=${end},setpts=(PTS-STARTPTS)/${segment.speed}[${v}]`,
     );
     videoLabels.push(`[${v}]`);
 
     if (hasAudio) {
       const a = `a${i}`;
       parts.push(
-        `[0:a]atrim=start=${start}:end=${end},asetpts=PTS-STARTPTS,${atempoChain(clip.speed)}[${a}]`,
+        `[0:a]atrim=start=${start}:end=${end},asetpts=PTS-STARTPTS,${atempoChain(segment.speed)}[${a}]`,
       );
       audioLabels.push(`[${a}]`);
     }
   });
 
-  const n = clips.length;
+  const n = segments.length;
   if (hasAudio) {
     parts.push(
       `${videoLabels.map((v, i) => `${v}${audioLabels[i]}`).join("")}concat=n=${n}:v=1:a=1[vout][aout]`,
@@ -84,15 +85,15 @@ function buildFilterGraph(clips: Clip[], hasAudio: boolean): FilterGraph {
  * ranges, so the original media is never mutated.
  */
 export async function exportTimeline(params: ExportParams): Promise<ExportResult> {
-  const clips = params.timeline.track.clips.filter(
-    (c) => clipOutputDurationMs(c) > 0,
-  );
-  if (clips.length === 0) {
+  // Preview and export share the exact same segment compilation, which is what
+  // guarantees preview/export parity.
+  const segments = compileSegments(params.timeline);
+  if (segments.length === 0) {
     throw new Error("Cannot export an empty timeline (all content was removed).");
   }
 
   const hasAudio = params.timeline.source.hasAudio;
-  const graph = buildFilterGraph(clips, hasAudio);
+  const graph = buildFilterGraph(segments, hasAudio);
 
   const args = [
     "-y",
@@ -122,6 +123,6 @@ export async function exportTimeline(params: ExportParams): Promise<ExportResult
 
   return {
     outputPath: params.outputPath,
-    durationMs: timelineDurationMs(params.timeline),
+    durationMs: previewDurationMs(segments),
   };
 }
