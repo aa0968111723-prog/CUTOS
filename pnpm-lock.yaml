@@ -70,6 +70,8 @@ importers:
         specifier: ^3.23.8
         version: 3.25.76
 
+  packages/jobs: {}
+
   packages/media:
     dependencies:
       '@cutos/edit-dsl':
@@ -78,6 +80,26 @@ importers:
       '@cutos/timeline':
         specifier: workspace:*
         version: link:../timeline
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+
+  packages/project-store:
+    dependencies:
+      '@cutos/edit-dsl':
+        specifier: workspace:*
+        version: link:../edit-dsl
+      '@cutos/media':
+        specifier: workspace:*
+        version: link:../media
+      '@cutos/timeline':
+        specifier: workspace:*
+        version: link:../timeline
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+
+  packages/storage: {}
 
   packages/timeline:
     dependencies:

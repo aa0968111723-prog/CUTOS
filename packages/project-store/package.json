@@ -1,5 +1,5 @@
 {
-  "name": "@cutos/media",
+  "name": "@cutos/project-store",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@cutos/edit-dsl": "workspace:*",
+    "@cutos/media": "workspace:*",
     "@cutos/timeline": "workspace:*",
     "zod": "^3.23.8"
   }
