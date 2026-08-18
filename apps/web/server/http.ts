@@ -1,13 +1,8 @@
 import { NextResponse } from "next/server";
 import { ConcurrencyError, ProjectNotFoundError } from "@cutos/project-store";
+import { HttpError } from "./errors.js";
 
-/** An error carrying an intended HTTP status code. */
-export class HttpError extends Error {
-  constructor(public readonly status: number, message: string, public readonly extra?: Record<string, unknown>) {
-    super(message);
-    this.name = "HttpError";
-  }
-}
+export { HttpError };
 
 export function json<T>(data: T, init?: ResponseInit): NextResponse {
   return NextResponse.json(data, init);

@@ -10,7 +10,7 @@ import type { AnalysisSection } from "@cutos/media";
 import { config, isAllowedMime } from "./config.js";
 import { getRuntime } from "./runtime.js";
 import { buildProjectDTO, buildProjectSummaries } from "./dto.js";
-import { HttpError } from "./http.js";
+import { HttpError } from "./errors.js";
 import { logger } from "./logger.js";
 
 const DEFAULT_SECTIONS: AnalysisSection[] = ["metadata", "silences", "waveform", "transcript"];

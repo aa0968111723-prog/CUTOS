@@ -14,6 +14,19 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
+    files: ["**/*.mjs", "scripts/**/*.js"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        console: "readonly",
+        performance: "readonly",
+        Buffer: "readonly",
+        setTimeout: "readonly",
+        URL: "readonly",
+      },
+    },
+  },
+  {
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: "module",
