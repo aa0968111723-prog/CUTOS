@@ -6,7 +6,7 @@ import {
 } from "@cutos/edit-dsl";
 import { clipOutputDurationMs, timelineDurationMs } from "@cutos/timeline";
 import { compileTimelineToPreview } from "@cutos/preview";
-import { DefaultApprovalPolicy, createPlanner, estimateImpact, type AgentRun } from "@cutos/agent";
+import { DefaultApprovalPolicy, describeProvider, estimateImpact, type AgentRun } from "@cutos/agent";
 import type {
   AgentRunDTO,
   ImpactDTO,
@@ -95,6 +95,7 @@ function toAgentRunDTO(run: AgentRun): AgentRunDTO {
 
 export function buildProjectDTO(id: string): ProjectDTO {
   const { store, agentRunStore } = getRuntime();
+  const providerInfo = describeProvider();
   const project = store.requireProject(id);
   const state = store.loadTimeline(id);
   const timeline = state?.current ?? { track: { clips: [] }, captions: [], markers: [] };
@@ -119,7 +120,17 @@ export function buildProjectDTO(id: string): ProjectDTO {
     name: project.name,
     version: project.version,
     updatedAt: project.updatedAt,
-    provider: createPlanner().name,
+    provider: providerInfo.name,
+    integration: {
+      provider: providerInfo.provider,
+      providerName: providerInfo.name,
+      aios: {
+        configured: providerInfo.aios.configured,
+        kernelUrl: providerInfo.aios.kernelUrl,
+        model: providerInfo.aios.model,
+        backend: providerInfo.aios.backend,
+      },
+    },
     timelineRevision: currentRevision,
     source: {
       durationMs: project.source.durationMs,

@@ -100,5 +100,12 @@ endpoint instead of the offline deterministic planner.
 The web app runs fully offline by default via the deterministic local planner. To route
 planning through an OpenAI-compatible endpoint instead, set `CUTOS_LLM_PROVIDER=openai`,
 `CUTOS_OPENAI_API_KEY`, and optionally `CUTOS_OPENAI_BASE_URL` / `CUTOS_OPENAI_MODEL`.
+
+### AI‑OS (AIOS) integration
+
+CUTOS integrates bidirectionally with [AIOS](https://github.com/agiresearch/AIOS): use an AIOS
+kernel as the planning brain (`CUTOS_LLM_PROVIDER=aios` + `CUTOS_AIOS_KERNEL_URL`), and let an AIOS
+agent drive CUTOS through a capability bridge (`GET /api/aios/manifest`, `POST /api/aios/invoke`).
+See [`docs/AIOS_INTEGRATION.md`](docs/AIOS_INTEGRATION.md).
 Generated media (sources, samples, exports) is written under a git-ignored `.data/` directory
 and never overwrites original source media.
