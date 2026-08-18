@@ -41,6 +41,9 @@ importers:
       '@cutos/media':
         specifier: workspace:*
         version: link:../../packages/media
+      '@cutos/preview':
+        specifier: workspace:*
+        version: link:../../packages/preview
       '@cutos/project-store':
         specifier: workspace:*
         version: link:../../packages/project-store

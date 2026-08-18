@@ -9,7 +9,7 @@ export async function GET(req: Request, ctx: { params: { id: string } }) {
   try {
     const { store, storage } = getRuntime();
     const asset = store.getAssetByKind(ctx.params.id, "original");
-    if (!asset) return errorResponse(404, "No source media.");
+    if (!asset) return errorResponse(404, "MEDIA_MISSING", "No source media.");
     return await serveStorageObject(storage, asset.storageKey, req);
   } catch (error) {
     return handleError(error);

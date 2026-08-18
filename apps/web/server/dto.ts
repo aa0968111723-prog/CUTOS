@@ -5,6 +5,7 @@ import {
   type EditPlan,
 } from "@cutos/edit-dsl";
 import { clipOutputDurationMs, timelineDurationMs } from "@cutos/timeline";
+import { compileTimelineToPreview } from "@cutos/preview";
 import { DefaultApprovalPolicy, createPlanner, estimateImpact, type AgentRun } from "@cutos/agent";
 import type {
   AgentRunDTO,
@@ -102,6 +103,16 @@ export function buildProjectDTO(id: string): ProjectDTO {
   const currentRevision = state?.revision ?? project.timelineRevision;
   const durationMs = state ? timelineDurationMs(state.current) : project.source.durationMs;
   const exportAsset = store.getAssetByKind(id, "export");
+  const preview = state
+    ? compileTimelineToPreview(state.current, { timelineRevision: currentRevision })
+    : {
+        timelineRevision: currentRevision,
+        durationMs,
+        hasAudio: project.source.hasAudio,
+        segments: [],
+        captions: [],
+        markers: [],
+      };
 
   return {
     id: project.id,
@@ -149,6 +160,7 @@ export function buildProjectDTO(id: string): ProjectDTO {
     agentRuns: agentRunStore.listByProject(id).slice(0, 5).map(toAgentRunDTO),
     hasExport: Boolean(exportAsset),
     exportDurationMs: exportAsset?.durationMs ?? undefined,
+    preview,
   };
 }
 

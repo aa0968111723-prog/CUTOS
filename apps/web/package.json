@@ -15,6 +15,7 @@
     "@cutos/edit-dsl": "workspace:*",
     "@cutos/jobs": "workspace:*",
     "@cutos/media": "workspace:*",
+    "@cutos/preview": "workspace:*",
     "@cutos/project-store": "workspace:*",
     "@cutos/storage": "workspace:*",
     "@cutos/timeline": "workspace:*",

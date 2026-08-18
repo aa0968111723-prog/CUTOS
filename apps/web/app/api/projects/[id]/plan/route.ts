@@ -14,7 +14,7 @@ const BodySchema = z.object({ instruction: z.string().min(1).max(2000) });
 export async function POST(req: Request, ctx: { params: { id: string } }) {
   try {
     const parsed = BodySchema.safeParse(await req.json().catch(() => ({})));
-    if (!parsed.success) return errorResponse(400, "An instruction is required.");
+    if (!parsed.success) return errorResponse(400, "VALIDATION_FAILED", "An instruction is required.");
     const result = await plan(ctx.params.id, parsed.data.instruction);
     return json(result);
   } catch (error) {

@@ -10,7 +10,7 @@ export async function POST(req: Request) {
     const form = await req.formData();
     const file = form.get("file");
     if (!(file instanceof File)) {
-      return errorResponse(400, "Expected a 'file' field containing a video.");
+      return errorResponse(400, "UPLOAD_INVALID", "Expected a 'file' field containing a video.");
     }
     const id = await importUpload(file);
     return json(getProject(id), { status: 201 });
