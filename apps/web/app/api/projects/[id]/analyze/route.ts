@@ -1,34 +1,19 @@
-import { detectSilence } from "@cutos/media";
-import { store } from "../../../../../server/store.js";
-import { jobs } from "../../../../../server/jobs.js";
+import { z } from "zod";
+import { enqueueAnalyze } from "../../../../../server/editor-service.js";
 import { handleError, json } from "../../../../../server/http.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-interface AnalyzeBody {
-  thresholdDb?: number;
-  minSilenceMs?: number;
-}
+const BodySchema = z
+  .object({ thresholdDb: z.number().optional(), minSilenceMs: z.number().int().positive().optional() })
+  .optional();
 
-/** Kick off silence analysis as a background job. */
 export async function POST(req: Request, ctx: { params: { id: string } }) {
   try {
-    const project = store.require(ctx.params.id);
-    const body = (await req.json().catch(() => ({}))) as AnalyzeBody;
-    const thresholdDb = body.thresholdDb ?? -30;
-    const minSilenceMs = body.minSilenceMs ?? 700;
-
-    const job = jobs.start("analyze", async () => {
-      const silences = await detectSilence(project.sourcePath, {
-        thresholdDb,
-        minSilenceMs,
-        sourceDurationMs: project.source.durationMs,
-      });
-      project.analysis = { thresholdDb, minSilenceMs, silences };
-    });
-
-    return json({ jobId: job.id }, { status: 202 });
+    const body = BodySchema.parse(await req.json().catch(() => ({})));
+    const jobId = enqueueAnalyze(ctx.params.id, body);
+    return json({ jobId }, { status: 202 });
   } catch (error) {
     return handleError(error);
   }

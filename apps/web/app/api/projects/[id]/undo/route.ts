@@ -1,16 +1,12 @@
-import { store } from "../../../../../server/store.js";
+import { undo } from "../../../../../server/editor-service.js";
 import { handleError, json } from "../../../../../server/http.js";
-import { toProjectDTO } from "../../../../../server/dto.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(_req: Request, ctx: { params: { id: string } }) {
   try {
-    const project = store.require(ctx.params.id);
-    project.history.undo();
-    project.output = undefined;
-    return json(toProjectDTO(project));
+    return json(undo(ctx.params.id));
   } catch (error) {
     return handleError(error);
   }

@@ -35,9 +35,18 @@ importers:
       '@cutos/edit-dsl':
         specifier: workspace:*
         version: link:../../packages/edit-dsl
+      '@cutos/jobs':
+        specifier: workspace:*
+        version: link:../../packages/jobs
       '@cutos/media':
         specifier: workspace:*
         version: link:../../packages/media
+      '@cutos/project-store':
+        specifier: workspace:*
+        version: link:../../packages/project-store
+      '@cutos/storage':
+        specifier: workspace:*
+        version: link:../../packages/storage
       '@cutos/timeline':
         specifier: workspace:*
         version: link:../../packages/timeline
@@ -50,6 +59,9 @@ importers:
       react-dom:
         specifier: 18.3.1
         version: 18.3.1(react@18.3.1)
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
     devDependencies:
       '@types/react':
         specifier: 18.3.11

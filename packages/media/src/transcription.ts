@@ -124,7 +124,9 @@ export class OpenAICompatibleTranscriber implements Transcriber {
     const form = new FormData();
     form.append("model", this.options.model);
     form.append("response_format", "verbose_json");
-    form.append("file", new Blob([bytes]), "audio.wav");
+    // Cast avoids lib-dependent BlobPart/Uint8Array buffer variance between the
+    // DOM and Node type libs across packages.
+    form.append("file", new Blob([bytes as unknown as ArrayBuffer]), "audio.wav");
 
     const res = await this.fetchImpl(`${this.options.baseUrl}/audio/transcriptions`, {
       method: "POST",

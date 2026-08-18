@@ -3,7 +3,15 @@ const nextConfig = {
   reactStrictMode: true,
   // The shared workspace packages export TypeScript source; let Next transpile
   // them instead of requiring a separate build step per package.
-  transpilePackages: ["@cutos/edit-dsl", "@cutos/timeline", "@cutos/media", "@cutos/agent"],
+  transpilePackages: [
+    "@cutos/edit-dsl",
+    "@cutos/timeline",
+    "@cutos/media",
+    "@cutos/agent",
+    "@cutos/jobs",
+    "@cutos/storage",
+    "@cutos/project-store",
+  ],
   webpack: (config) => {
     // Allow explicit ".js" specifiers in TypeScript source to resolve to the
     // corresponding ".ts"/".tsx" files (matching the TS "Bundler" resolution

@@ -372,3 +372,143 @@ button {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* Workspace layout */
+.ws-grid {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: 1fr;
+}
+
+.ws-side,
+.ws-main,
+.ws-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+/* Mobile: agent-first ordering. */
+.ws-agent { order: 1; }
+.ws-main { order: 2; }
+.ws-side { order: 3; }
+
+@media (min-width: 1024px) {
+  .app {
+    max-width: 1400px;
+  }
+  .ws-grid {
+    grid-template-columns: 280px minmax(0, 1fr) 420px;
+  }
+  .ws-side { grid-column: 1; order: 0; }
+  .ws-main { grid-column: 2; order: 0; }
+  .ws-agent { grid-column: 3; order: 0; }
+}
+
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 13px;
+  border-radius: 8px;
+}
+
+.linklike {
+  background: none;
+  border: none;
+  color: var(--text);
+  text-align: left;
+  padding: 0;
+  flex: 1;
+}
+.linklike:hover {
+  color: var(--accent);
+}
+
+.history-item.active {
+  color: var(--accent);
+}
+
+.pill-warn {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.risk-low { border-color: var(--success); color: var(--success); }
+.risk-medium { border-color: var(--warn); color: var(--warn); }
+.risk-high { border-color: var(--danger); color: var(--danger); }
+
+.review-card {
+  border: 1px solid var(--accent);
+}
+
+.op-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.op-row:last-child { border-bottom: none; }
+.op-main {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 13px;
+}
+.op-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.activity {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.activity-step {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-left: 14px;
+  border-left: 2px solid var(--border);
+}
+.activity-step.kind-approval { border-left-color: var(--warn); }
+.activity-step.kind-error { border-left-color: var(--danger); }
+.activity-step.kind-plan { border-left-color: var(--accent); }
+.activity-title { font-size: 13px; }
+.activity-detail { font-size: 12px; color: var(--muted); }
+
+.inspector {
+  margin: 0;
+  display: grid;
+  gap: 6px;
+}
+.inspector > div {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+}
+.inspector dt { color: var(--muted); }
+.inspector dd { margin: 0; }
+
+.job-center {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 8px 16px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  box-shadow: var(--shadow);
+  font-size: 13px;
+  z-index: 50;
+}
