@@ -14,6 +14,8 @@ import {
   type ProjectPatch,
   type ProjectRecord,
   type ProjectRepository,
+  type RunRecord,
+  type RunRepository,
   type TimelineRepository,
   type VideoAnalysis,
 } from "./types.js";
@@ -153,12 +155,33 @@ class MemoryAnalysisRepository implements AnalysisRepository {
   }
 }
 
+class MemoryRunRepository implements RunRepository {
+  private rows = new Map<string, RunRecord>();
+  save(record: RunRecord): void {
+    this.rows.set(record.id, clone(record));
+  }
+  get(id: string): RunRecord | undefined {
+    const r = this.rows.get(id);
+    return r ? clone(r) : undefined;
+  }
+  listByProject(projectId: string): RunRecord[] {
+    return [...this.rows.values()]
+      .filter((r) => r.projectId === projectId)
+      .map(clone)
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+  deleteForProject(projectId: string): void {
+    for (const [id, r] of this.rows) if (r.projectId === projectId) this.rows.delete(id);
+  }
+}
+
 export function createMemoryRepositories(): Repositories {
   return {
     projects: new MemoryProjectRepository(),
     timelines: new MemoryTimelineRepository(),
     media: new MemoryMediaRepository(),
     analyses: new MemoryAnalysisRepository(),
+    runs: new MemoryRunRepository(),
   };
 }
 

@@ -11,6 +11,8 @@ import type {
   ProjectPatch,
   ProjectRecord,
   ProjectRepository,
+  RunRecord,
+  RunRepository,
   TimelineRepository,
   VideoAnalysis,
 } from "./types.js";
@@ -21,6 +23,7 @@ export interface Repositories {
   timelines: TimelineRepository;
   media: MediaRepository;
   analyses: AnalysisRepository;
+  runs: RunRepository;
 }
 
 /**
@@ -73,7 +76,20 @@ export class ProjectStore {
     this.repos.timelines.deleteForProject(id);
     this.repos.media.deleteForProject(id);
     this.repos.analyses.deleteForProject(id);
+    this.repos.runs.deleteForProject(id);
     this.repos.projects.delete(id);
+  }
+
+  // --- agent runs (opaque records) ---
+
+  saveRun(record: RunRecord): void {
+    this.repos.runs.save(record);
+  }
+  getRun(id: string): RunRecord | undefined {
+    return this.repos.runs.get(id);
+  }
+  listRuns(projectId: string): RunRecord[] {
+    return this.repos.runs.listByProject(projectId);
   }
 
   // --- timeline ---

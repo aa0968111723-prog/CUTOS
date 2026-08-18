@@ -111,6 +111,22 @@ export interface AnalysisRepository {
   deleteForProject(projectId: string): void;
 }
 
+/** An opaque, persisted agent-run record (the AgentRun shape lives in @cutos/agent). */
+export interface RunRecord {
+  id: string;
+  projectId: string;
+  createdAt: number;
+  updatedAt: number;
+  data: unknown;
+}
+
+export interface RunRepository {
+  save(record: RunRecord): void;
+  get(id: string): RunRecord | undefined;
+  listByProject(projectId: string): RunRecord[];
+  deleteForProject(projectId: string): void;
+}
+
 export class ProjectNotFoundError extends Error {
   constructor(id: string) {
     super(`Project ${id} not found`);

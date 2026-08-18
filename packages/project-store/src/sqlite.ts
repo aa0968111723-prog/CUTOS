@@ -17,6 +17,8 @@ import {
   type ProjectPatch,
   type ProjectRecord,
   type ProjectRepository,
+  type RunRecord,
+  type RunRepository,
   type TimelineRepository,
   type VideoAnalysis,
 } from "./types.js";
@@ -85,6 +87,14 @@ function migrate(db: Db): void {
         projectId TEXT PRIMARY KEY,
         data TEXT NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS agent_runs (
+        id TEXT PRIMARY KEY,
+        projectId TEXT NOT NULL,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        data TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_runs_project ON agent_runs(projectId, createdAt);
     `);
   }
 
@@ -336,6 +346,41 @@ class SqliteAnalysisRepository implements AnalysisRepository {
   }
 }
 
+class SqliteRunRepository implements RunRepository {
+  constructor(private db: Db) {}
+
+  save(record: RunRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO agent_runs (id, projectId, createdAt, updatedAt, data)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET updatedAt = excluded.updatedAt, data = excluded.data`,
+      )
+      .run(record.id, record.projectId, record.createdAt, record.updatedAt, JSON.stringify(record.data));
+  }
+  get(id: string): RunRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM agent_runs WHERE id = ?").get(id) as unknown as
+      | { id: string; projectId: string; createdAt: number; updatedAt: number; data: string }
+      | undefined;
+    return row ? { ...row, data: JSON.parse(row.data) as unknown } : undefined;
+  }
+  listByProject(projectId: string): RunRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM agent_runs WHERE projectId = ? ORDER BY createdAt DESC")
+      .all(projectId) as unknown as {
+      id: string;
+      projectId: string;
+      createdAt: number;
+      updatedAt: number;
+      data: string;
+    }[];
+    return rows.map((r) => ({ ...r, data: JSON.parse(r.data) as unknown }));
+  }
+  deleteForProject(projectId: string): void {
+    this.db.prepare("DELETE FROM agent_runs WHERE projectId = ?").run(projectId);
+  }
+}
+
 export function createSqliteRepositories(filename: string): Repositories & { close: () => void } {
   const db = openDatabase(filename);
   return {
@@ -343,6 +388,7 @@ export function createSqliteRepositories(filename: string): Repositories & { clo
     timelines: new SqliteTimelineRepository(db),
     media: new SqliteMediaRepository(db),
     analyses: new SqliteAnalysisRepository(db),
+    runs: new SqliteRunRepository(db),
     close: () => db.close(),
   };
 }
