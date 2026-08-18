@@ -48,9 +48,9 @@ export function TimelinePanel({ editor, project }: { editor: Editor; project: Pr
         </span>
       </div>
 
-      {(project.timeline.markers.length > 0 || project.timeline.captions.length > 0) && (
+      {((project.timeline.markers?.length ?? 0) > 0 || (project.timeline.captions?.length ?? 0) > 0) && (
         <div className="muted" style={{ marginTop: 10, fontSize: 12 }}>
-          {project.timeline.captions.length} caption(s) · {project.timeline.markers.length} marker(s)
+          {project.timeline.captions?.length ?? 0} caption(s) · {project.timeline.markers?.length ?? 0} marker(s)
         </div>
       )}
 
