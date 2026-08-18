@@ -1,0 +1,28 @@
+{
+  "name": "cutos",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Agent-first conversational video editor (monorepo)",
+  "type": "module",
+  "packageManager": "pnpm@10.33.3",
+  "engines": {
+    "node": ">=20.11.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @cutos/web dev",
+    "build": "pnpm --filter @cutos/web build",
+    "start": "pnpm --filter @cutos/web start",
+    "lint": "eslint .",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.13.0",
+    "@types/node": "^22.8.0",
+    "eslint": "^9.13.0",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.11.0",
+    "vitest": "^2.1.4"
+  }
+}
