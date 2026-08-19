@@ -1,5 +1,5 @@
 {
-  "name": "@cutos/agent",
+  "name": "@cutos/protocol",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,8 +12,6 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@cutos/edit-dsl": "workspace:*",
-    "@cutos/protocol": "workspace:*",
     "zod": "^3.23.8"
   }
 }

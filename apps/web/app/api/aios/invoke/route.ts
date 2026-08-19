@@ -1,21 +1,21 @@
-import { z } from "zod";
-import { invokeAiosCapability } from "../../../../server/aios-bridge.js";
-import { errorResponse, handleError, json } from "../../../../server/http.js";
+import { handleInvokeBody } from "../../../../server/aios-bridge.js";
+import { handleError, json } from "../../../../server/http.js";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const BodySchema = z.object({
-  name: z.string().min(1),
-  args: z.record(z.unknown()).optional(),
-});
-
-/** Single validated entrypoint for an AIOS agent to invoke a CUTOS capability. */
+/**
+ * Single validated entrypoint for an AIOS agent to invoke a CUTOS capability.
+ *
+ * Accepts both the cutos.agent.v2 envelope (capability + correlation) and the
+ * legacy v1 shape ({ name, args }); the response mirrors whichever was sent.
+ * A v2 governance failure is a 200 with `ok:false` so the caller can read the
+ * typed error code, approval request and correlation without parsing HTTP.
+ */
 export async function POST(req: Request) {
   try {
-    const parsed = BodySchema.safeParse(await req.json().catch(() => ({})));
-    if (!parsed.success) return errorResponse(400, "VALIDATION_FAILED", "name is required.");
-    return json(await invokeAiosCapability(parsed.data.name, parsed.data.args ?? {}));
+    const dispatched = await handleInvokeBody(await req.json().catch(() => ({})));
+    return json(dispatched.response);
   } catch (error) {
     return handleError(error);
   }

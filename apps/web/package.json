@@ -17,6 +17,8 @@
     "@cutos/media": "workspace:*",
     "@cutos/preview": "workspace:*",
     "@cutos/project-store": "workspace:*",
+    "@cutos/protocol": "workspace:*",
+    "@cutos/semantic": "workspace:*",
     "@cutos/storage": "workspace:*",
     "@cutos/timeline": "workspace:*",
     "next": "14.2.15",

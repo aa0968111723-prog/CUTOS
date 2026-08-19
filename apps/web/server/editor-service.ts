@@ -296,3 +296,93 @@ export function cancelJob(jobId: string) {
   jobStore.cancel(jobId);
   return getJob(jobId);
 }
+
+export function retryJob(jobId: string) {
+  const { jobStore } = getRuntime();
+  const job = jobStore.get(jobId);
+  if (!job) throw new HttpError(404, "JOB_NOT_FOUND", "Job not found.");
+  if (job.status === "queued" || job.status === "running") return getJob(jobId);
+  jobStore.retry(jobId);
+  return getJob(jobId);
+}
+
+/**
+ * Agent-run inspection for the AIOS control plane. AIOS holds the DAG; CUTOS
+ * holds the editing run it produced, and these three calls are how AIOS
+ * reconciles the two after a restart on either side.
+ */
+export function getAgentRun(runId: string) {
+  const { agentRunStore } = getRuntime();
+  const run = agentRunStore.get(runId);
+  if (!run) throw new HttpError(404, "OPERATION_NOT_FOUND", "Agent run not found.");
+  return {
+    id: run.id,
+    projectId: run.projectId,
+    status: run.status,
+    input: run.input,
+    planId: run.planId,
+    summary: run.summary,
+    error: run.error,
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+    steps: run.steps.map((step) => ({
+      at: step.at,
+      kind: step.kind,
+      title: step.title,
+      detail: step.detail,
+      data: step.data,
+    })),
+  };
+}
+
+/**
+ * Cancel an editing run. A run that has already been applied is terminal --
+ * cancelling it would imply undoing a committed timeline mutation, which must
+ * go through undo, not through run control.
+ */
+export function cancelAgentRun(runId: string) {
+  const { agentRunStore, store } = getRuntime();
+  const run = agentRunStore.get(runId);
+  if (!run) throw new HttpError(404, "OPERATION_NOT_FOUND", "Agent run not found.");
+  if (run.status === "applied" || run.status === "completed") {
+    throw new HttpError(409, "VALIDATION_FAILED", "Run already completed; use undo instead.");
+  }
+  if (run.status !== "cancelled") {
+    run.status = "cancelled";
+    run.updatedAt = Date.now();
+    run.steps.push({
+      at: run.updatedAt,
+      kind: "error",
+      title: "Run cancelled",
+      detail: "cancelled by the control plane",
+    });
+    agentRunStore.save(run);
+    // A cancelled run must not leave a stageable plan behind.
+    const pending = store.loadPendingPlan(run.projectId);
+    if (pending && pending.id === run.planId) store.savePendingPlan(run.projectId, null);
+  }
+  return getAgentRun(runId);
+}
+
+/**
+ * Resume a run that is waiting for approval. This does not re-plan: it reports
+ * whether the staged plan is still applicable against the current revision, so
+ * AIOS can decide between apply and replan.
+ */
+export function resumeAgentRun(runId: string) {
+  const { agentRunStore, store } = getRuntime();
+  const run = agentRunStore.get(runId);
+  if (!run) throw new HttpError(404, "OPERATION_NOT_FOUND", "Agent run not found.");
+  const state = store.loadTimeline(run.projectId);
+  const revision = state?.revision ?? store.requireProject(run.projectId).timelineRevision;
+  const pending = store.loadPendingPlan(run.projectId);
+  const planStillStaged = Boolean(pending && pending.id === run.planId);
+  const stale = planStillStaged && pending ? isPlanStale(pending, revision) : false;
+  return {
+    ...getAgentRun(runId),
+    resumable: run.status === "awaiting_approval" && planStillStaged && !stale,
+    planStillStaged,
+    stale,
+    timelineRevision: revision,
+  };
+}

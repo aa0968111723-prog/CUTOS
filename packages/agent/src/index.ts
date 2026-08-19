@@ -4,6 +4,7 @@ export * from "./local-planner.js";
 export * from "./openai-planner.js";
 export * from "./aios-planner.js";
 export * from "./aios-health.js";
+export * from "./aios-orchestrator.js";
 export * from "./gateway.js";
 export * from "./factory.js";
 export * from "./tools.js";
