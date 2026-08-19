@@ -237,23 +237,28 @@ export class HttpAiosOrchestrator implements AiosOrchestrator {
   /** Never trust the peer: a malformed run state is a hard, typed failure. */
   private parseState(payload: unknown): AiosRunState {
     const parsed = aiosRunStateSchema.safeParse(payload);
-    if (!parsed.success) {
-      const compatibility = checkProtocolCompatibility(
-        (payload as { protocolVersion?: string } | null)?.protocolVersion,
-        [],
-        CUTOS_SUPPORTED_PROTOCOLS,
-      );
-      throw new AiosOrchestratorError(
-        compatibility.compatible ? "VALIDATION_FAILED" : "PROTOCOL_VERSION_MISMATCH",
-        compatibility.compatible
-          ? `AIOS returned a malformed run state: ${parsed.error.issues
-            .map((issue) => `${issue.path.join(".") || "root"}: ${issue.message}`)
-            .slice(0, 5)
-            .join("; ")}`
-          : "AIOS speaks an incompatible protocol version",
-      );
+    if (parsed.success) return parsed.data;
+
+    // Distinguish the two failure modes the operator has to act on:
+    // a peer that DECLARES a protocol we cannot speak (upgrade one side) vs a
+    // peer on our protocol that sent a broken body (a bug on their side).
+    const declared = (payload as { protocolVersion?: unknown } | null)?.protocolVersion;
+    if (typeof declared === "string") {
+      const compatibility = checkProtocolCompatibility(declared, [], CUTOS_SUPPORTED_PROTOCOLS);
+      if (!compatibility.compatible) {
+        throw new AiosOrchestratorError(
+          "PROTOCOL_VERSION_MISMATCH",
+          `AIOS speaks ${declared}; CUTOS speaks ${CUTOS_SUPPORTED_PROTOCOLS.join(", ")}`,
+        );
+      }
     }
-    return parsed.data;
+    throw new AiosOrchestratorError(
+      "VALIDATION_FAILED",
+      `AIOS returned a malformed run state: ${parsed.error.issues
+        .map((issue) => `${issue.path.join(".") || "root"}: ${issue.message}`)
+        .slice(0, 5)
+        .join("; ")}`,
+    );
   }
 }
 

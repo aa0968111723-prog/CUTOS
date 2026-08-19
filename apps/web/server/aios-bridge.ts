@@ -279,7 +279,7 @@ export interface InvokeInput {
   protocolVersion?: string;
   capability: string;
   args: Record<string, unknown>;
-  correlation: Partial<RunCorrelation> & { requestId?: string };
+  correlation: Partial<RunCorrelation> & { requestId?: string | undefined };
   expectedRevision?: number;
   approval?: { approvalId?: string; granted: boolean; grantedBy?: string; grantedAt?: string };
 }
@@ -798,9 +798,41 @@ export async function handleInvokeBody(body: unknown): Promise<
       }),
     };
   }
+  // A v2-shaped body whose protocolVersion this build does not know must still
+  // get a typed PROTOCOL_VERSION_MISMATCH rather than a generic 400: the
+  // contract says an incompatible peer fails clearly, never silently.
+  if (looksLikeV2(body)) {
+    const raw = body as {
+      protocolVersion?: unknown;
+      capability?: unknown;
+      args?: unknown;
+      correlation?: { requestId?: unknown };
+      expectedRevision?: unknown;
+    };
+    return {
+      protocol: "v2",
+      response: await invokeCapabilityV2({
+        protocolVersion: typeof raw.protocolVersion === "string" ? raw.protocolVersion : undefined,
+        capability: String(raw.capability),
+        args: (raw.args ?? {}) as Record<string, unknown>,
+        correlation: {
+          requestId: typeof raw.correlation?.requestId === "string" ? raw.correlation.requestId : undefined,
+        },
+        ...(typeof raw.expectedRevision === "number" ? { expectedRevision: raw.expectedRevision } : {}),
+      }),
+    };
+  }
+
   const v1 = legacyInvokeRequestSchema.safeParse(body);
   if (!v1.success) {
     throw new HttpError(400, "VALIDATION_FAILED", "name (v1) or capability + correlation (v2) is required.");
   }
   return { protocol: "v1", response: await invokeAiosCapability(v1.data.name, v1.data.args) };
+}
+
+/** A body carrying `capability` + `correlation` is a v2 attempt, valid or not. */
+function looksLikeV2(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false;
+  const record = body as { capability?: unknown; correlation?: unknown };
+  return typeof record.capability === "string" && typeof record.correlation === "object";
 }
