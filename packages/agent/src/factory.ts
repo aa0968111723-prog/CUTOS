@@ -7,6 +7,7 @@ export interface AiosConfig {
   configured: boolean;
   kernelUrl?: string;
   queryPath: string;
+  healthPath: string;
   model: string;
   backend: string;
   agentName: string;
@@ -19,6 +20,7 @@ export function readAiosConfig(env: NodeJS.ProcessEnv = process.env): AiosConfig
     configured: Boolean(kernelUrl),
     kernelUrl,
     queryPath: env.CUTOS_AIOS_QUERY_PATH ?? "/query",
+    healthPath: env.CUTOS_AIOS_HEALTH_PATH ?? "/health",
     model: env.CUTOS_AIOS_MODEL ?? "gpt-4o-mini",
     backend: env.CUTOS_AIOS_BACKEND ?? "openai",
     agentName: env.CUTOS_AIOS_AGENT_NAME ?? "cutos",

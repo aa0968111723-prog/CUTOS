@@ -60,6 +60,11 @@ describe("AIOS bridge", () => {
     expect(Array.isArray(res.result)).toBe(true);
   });
 
+  it("reports AIOS health as not-configured when no kernel URL is set", async () => {
+    const health = await bridge.checkAiosHealth();
+    expect(health.configured).toBe(false);
+  });
+
   it("drives CUTOS end-to-end through the bridge (create → analyze → plan → apply)", async () => {
     if (!available) return;
     const created = (await bridge.invokeAiosCapability("create_sample_project", {})).result as {

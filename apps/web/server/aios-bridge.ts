@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { describeProvider } from "@cutos/agent";
+import { checkAiosConnection, describeProvider, readAiosConfig } from "@cutos/agent";
 import * as service from "./editor-service.js";
 import { HttpError } from "./errors.js";
 
@@ -159,6 +159,19 @@ export function getAiosManifest() {
 
 export function listCapabilityNames(): string[] {
   return capabilities.map((c) => c.name);
+}
+
+/** Probe the configured AIOS kernel (inbound) for connectivity. */
+export async function checkAiosHealth() {
+  const config = readAiosConfig();
+  if (!config.configured || !config.kernelUrl) {
+    return { configured: false as const };
+  }
+  const status = await checkAiosConnection({
+    kernelUrl: config.kernelUrl,
+    healthPath: config.healthPath,
+  });
+  return { configured: true as const, ...status };
 }
 
 export async function invokeAiosCapability(name: string, rawArgs: unknown) {
