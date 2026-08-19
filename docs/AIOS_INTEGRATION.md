@@ -12,6 +12,24 @@ AIOS Agent ──GET /api/aios/manifest──▶ CUTOS 能力清單
            ──POST /api/aios/invoke───▶ CUTOS 剪輯能力（analyze / plan / apply / export …）
 ```
 
+## 下一階段：AIOS-native Orchestration
+
+PR #9 把這個整合從「規劃器 + capability bridge」升級成 **AIOS Control Plane + CUTOS Editing Data Plane**。
+
+AIOS 會負責 Scheduler、Context、Memory、Tool governance、模型資源路由與多代理長任務協調；CUTOS 繼續掌握 Project、Media、Semantic Index、Edit DSL、Timeline、Preview、Render 的唯一真實狀態。
+
+完整規格：[`PR9_AIOS_NATIVE_ORCHESTRATION.md`](PR9_AIOS_NATIVE_ORCHESTRATION.md)
+
+核心原則：
+
+- AIOS 不直接修改 Timeline。
+- AIOS 不直接執行任意 FFmpeg shell command。
+- AIOS memory 不取代 CUTOS ProjectStore / canonical transcript / Timeline。
+- 長影片先由 CUTOS semantic retrieval 產生 bounded context，再交 AIOS。
+- semantic capabilities 仍擴充在既有 `/api/aios/manifest` / `/api/aios/invoke`，不建立第二套橋接 API。
+- 所有 write/mutation capability 必須經 approval、revision guard、Edit DSL validation。
+- run / job / agent activity 必須可 correlation、取消、恢復與重試。
+
 ## Inbound：用 AIOS Kernel 當規劃器
 
 `AiosPlanner`（`packages/agent`）以 AIOS 文件化的 **LLM Core API**（`LLMQuery` → `LLMResponse`）向 kernel 發問，並與 `LocalHeuristicPlanner`、`OpenAICompatiblePlanner` 實作同一個 `Planner` 介面。所有輸出仍會經過 gateway 的 Edit DSL 驗證才會影響時間軸。
@@ -44,6 +62,10 @@ CUTOS 把剪輯能力開放為可被 AIOS agent 呼叫的介面：
 - `POST /api/aios/invoke` — 單一驗證入口：`{ "name": "<capability>", "args": { ... } }`。
 
 能力（capabilities）：`list_projects`、`create_sample_project`、`get_project`、`analyze`、`plan`、`preview_operation`、`reject_operation`、`apply`、`undo`、`redo`、`export`、`get_job`。
+
+PR #9 將在同一 bridge 上加入 semantic / orchestration capabilities，例如：
+
+`get_transcript`、`search_transcript`、`search_semantic`、`list_speakers`、`list_topics`、`find_highlights`、`inspect_scene`、`get_context_range`、`create_edit_plan`、`verify_edit_plan`、`preview_edit_plan`、`apply_edit_plan`。
 
 每個能力都以 zod 驗證參數、標註權限，且**只透過 `projectId` 引用媒體**，不接受任意檔案路徑——不會破壞 StorageAdapter 的安全性。
 
