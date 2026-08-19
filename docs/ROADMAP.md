@@ -49,18 +49,32 @@ Goal: make CUTOS feel like a real conversational editor by showing edited result
 
 Detailed specification: [`PR4_INSTANT_PREVIEW_ZH_TW.md`](PR4_INSTANT_PREVIEW_ZH_TW.md)
 
-## Phase 2 — Semantic editing
+## Phase 2 — Semantic Video Intelligence
 
-- Speaker diarization
+Goal: let CUTOS understand what is being said, who is speaking, how the video is structured, and which segments matter before asking the editing agent to act.
+
+- Production-shaped real ASR adapter with deterministic fallback
+- Traditional Chinese word/sentence timestamps and segmentation
+- Speaker diarization + transcript alignment
 - Scene/shot segmentation
 - Topic segmentation
-- Highlight scoring
-- Search video by meaning
+- Persistent semantic index over transcript/topics
+- Highlight scoring with explainable reasons
+- Incremental, cacheable analysis stages
+- Agent tools for transcript search, topic lookup, speaker segments and highlights
+- Bounded semantic context retrieval for long videos
+- Transcript / speaker / topic / highlight UI in zh-TW
+- Transcript ↔ preview ↔ timeline synchronization
+- AI-OS capability expansion for semantic video queries
 - Commands such as:
-  - "remove repeated explanations"
-  - "keep the strongest answer"
-  - "make this section faster"
-  - "find all mentions of X"
+  - "把重複講的地方刪掉"
+  - "找出講到禪定的所有片段"
+  - "只留下主持人說話的地方"
+  - "保留最重要的 90 秒"
+  - "找三段最適合做短影音的內容"
+  - "把第二個話題剪短一點"
+
+Detailed specification: [`PR8_SEMANTIC_VIDEO_INTELLIGENCE.md`](PR8_SEMANTIC_VIDEO_INTELLIGENCE.md)
 
 ## Phase 3 — Short-form creation
 
