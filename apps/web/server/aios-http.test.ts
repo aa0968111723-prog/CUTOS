@@ -1,4 +1,6 @@
 import { createServer, type Server } from "node:http";
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -7,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { run } from "@cutos/media";
 import {
   CUTOS_PROTOCOL_VERSION,
+  PROTOCOL_CONTRACT_FINGERPRINT,
   capabilityManifestSchema,
   capabilityResponseSchema,
   cutosHealthSchema,
@@ -29,6 +32,71 @@ import type * as EditorService from "./editor-service.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = join(HERE, "../../../docs/contract/cutos.agent.v2.fixtures.json");
+/** The mirrored file itself, so the fixture can pin the exact bytes ai_os must hold. */
+const PROTOCOL_SOURCE_PATH = join(HERE, "../../../packages/protocol/src/protocol.ts");
+
+/**
+ * The fixture is a committed artifact, so it has to be a function of the
+ * protocol — not of the clock or of `crypto.randomUUID()`.
+ *
+ * Before this normalizer every run rewrote ~284 lines with fresh ids and
+ * timestamps: the working tree was dirty after `pnpm test`, and the copy in
+ * ai_os could never be byte-equal to the copy here, which quietly cost the
+ * artifact the one property that made it a cross-repo contract. Ids are
+ * renumbered in first-appearance order, so identity *relationships* inside an
+ * exchange survive while the values stop moving.
+ */
+const FIXED_ISO = "2026-01-01T00:00:00.000Z";
+const FIXED_EPOCH = 1_767_225_600_000;
+const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+/**
+ * CUTOS's own id shapes (`run_<base36>`, `plan_<base36>_<base36>`) are not
+ * uuids, so the uuid rule alone left them churning. Three guards keep it off
+ * anything that is not a generated id: the lookarounds exclude `apply_edit_plan`
+ * and `job_not_found`; the tail must contain a digit, which a base36 timestamp
+ * always does and an English word does not; and `scenario` labels are never
+ * walked at all (the first version renamed the `job_polling` scenario to
+ * `job_000000000008` and broke ai_os's coverage assertion).
+ */
+const CUTOS_ID_RE = /(?<![A-Za-z0-9_])(run|plan|job|preview|export)_(?=[a-z0-9]*\d)[a-z0-9]{6,}(?:_[a-z0-9]{4,})?(?![A-Za-z0-9_])/g;
+const ISO_RE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z/g;
+/** Wall-clock measurements: real, but never the same twice. */
+const ELAPSED_KEYS = new Set(["latencyMs", "elapsedMs", "tookMs"]);
+
+function normalizeFixture(value: unknown): unknown {
+  const ids = new Map<string, string>();
+  const idFor = (raw: string): string => {
+    const key = raw.toLowerCase();
+    const existing = ids.get(key);
+    if (existing) return existing;
+    const placeholder = `00000000-0000-4000-8000-${String(ids.size + 1).padStart(12, "0")}`;
+    ids.set(key, placeholder);
+    return placeholder;
+  };
+  const walk = (node: unknown): unknown => {
+    if (typeof node === "string") {
+      // Replace inside the string, not only whole-string matches: an
+      // idempotency key embeds the project uuid and must renumber with it.
+      return node
+        .replace(UUID_RE, idFor)
+        .replace(CUTOS_ID_RE, (match, prefix: string) => `${prefix}_${idFor(match).slice(-12)}`)
+        .replace(ISO_RE, FIXED_ISO);
+    }
+    if (typeof node === "number") {
+      // Epoch milliseconds in a plausible range; a duration in ms is far smaller.
+      return node >= 1_600_000_000_000 && node <= 2_000_000_000_000 ? FIXED_EPOCH : node;
+    }
+    if (Array.isArray(node)) return node.map(walk);
+    if (node && typeof node === "object") {
+      return Object.fromEntries(
+        Object.entries(node as Record<string, unknown>)
+          .map(([key, item]) => [key, ELAPSED_KEYS.has(key) && typeof item === "number" ? 0 : walk(item)]),
+      );
+    }
+    return node;
+  };
+  return walk(value);
+}
 
 interface Exchange {
   scenario: string;
@@ -121,6 +189,14 @@ describe("CUTOS AIOS bridge over real HTTP", () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
     if (exchanges.length > 0) {
       await mkdir(dirname(FIXTURE_PATH), { recursive: true });
+      // The sha256 of the mirrored protocol file is what turns this artifact
+      // into a real cross-repo check. `PROTOCOL_CONTRACT_FINGERPRINT` alone
+      // could not do it: each repo only ever compared its own constant against
+      // its own descriptor, so a contract edit mirrored into one repo and not
+      // the other left both suites green. ai_os hashes ITS copy of the file and
+      // compares it with the value recorded here, so a half-mirrored change is
+      // red on the side that did not receive it.
+      const protocolSource = await readFile(PROTOCOL_SOURCE_PATH);
       await writeFile(
         FIXTURE_PATH,
         `${JSON.stringify(
@@ -128,11 +204,21 @@ describe("CUTOS AIOS bridge over real HTTP", () => {
             $comment:
               "Generated by apps/web/server/aios-http.test.ts from real HTTP traffic against the "
               + "production CUTOS handlers. Replayed by ai_os (server/services/cutosContract.test.ts) "
-              + "to prove both repos agree on cutos.agent.v2. Regenerate with: pnpm vitest run "
-              + "apps/web/server/aios-http.test.ts",
+              + "to prove both repos agree on cutos.agent.v2. Deterministic by construction: ids and "
+              + "timestamps are normalized, so regenerating without a protocol change is a no-op diff. "
+              + "Regenerate with: pnpm vitest run apps/web/server/aios-http.test.ts",
             protocolVersion: CUTOS_PROTOCOL_VERSION,
+            contractFingerprint: PROTOCOL_CONTRACT_FINGERPRINT,
+            protocolSourceSha256: createHash("sha256").update(protocolSource).digest("hex"),
             generator: "cutos",
-            exchanges,
+            // The scenario label is a fixed name chosen by this test, not
+            // recorded data: normalizing it would rename the very keys ai_os
+            // looks scenarios up by.
+            exchanges: exchanges.map((exchange) => ({
+              scenario: exchange.scenario,
+              request: normalizeFixture(exchange.request),
+              response: normalizeFixture(exchange.response),
+            })),
           },
           null,
           2,

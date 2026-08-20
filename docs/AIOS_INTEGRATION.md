@@ -43,7 +43,7 @@ TypeScript interface 不夠，因為對方是另一個 repo 的另一個 process
 `PROTOCOL_CONTRACT_FINGERPRINT`，兩個 repo 的測試斷言同一個值。單邊修改協定而未
 鏡像，兩邊測試都會紅。
 
-目前 fingerprint：`d309ebbe4020a6f7e4a496d8de215433b8750a44d7f4cfbc6b0c718e529515c6`
+目前 fingerprint：`2f89e2c4e7af5abd1cb2deb84814c903720ab5b514711fedf6ca592cd5d07c1f`
 
 版本協商由 `checkProtocolCompatibility()` 負責；**不相容時明確失敗**，不做 silent
 fallback。`packages/protocol/src/version.ts` 是不含 `node:crypto` 的版本常數，
@@ -163,6 +163,24 @@ handle 寫進 ProjectStore（以推導出的 idempotency key 為索引），所�
 submit 途中崩潰不會產生兩個 AIOS run；重啟後 `reconcileAiosRuns()` 會去問 AIOS
 真正發生了什麼。
 
+### 這個方向真的通了（而且以前沒有）
+
+第一版有 client 卻沒有對端：CUTOS 送 `/api/cutos/*`，ai_os 一條都沒實作，而兩邊
+測試全綠——因為 orchestrator 只被「寫在自己測試檔裡的假伺服器」測過，那是照鏡子，
+不是合約。現在三件事同時補上：
+
+1. **ai_os 真的提供這些端點**（`server/services/cutosInboundRuns.ts`，掛在
+   `server/index.ts`）。
+2. **協定描述了這個面**：`PROTOCOL_CONTRACT.aiosEndpoints` 與 `aiosCapabilities`
+   進了 fingerprint，所以「AIOS 少掛一條路由」現在是紅燈，不是執行期 404。
+3. **CUTOS 這側可以真的被呼叫**：`POST /api/aios/runs`、
+   `GET /api/aios/runs?projectId=`、`GET|POST /api/aios/runs/{handleId}`
+   （`action` 只接受 `cancel` / `resume`，沒有任何方法可以指名任意函式）。
+
+AIOS 對這種 inbound run 的治理沒有放寬：run 會落在**一般的核准閘門**（回報
+`waiting_approval`），送出者不能核准自己的 run——`resume` 明確回
+`APPROVAL_REQUIRED` 而不是放行。
+
 ### 廠商中立
 
 `AiosRunRequest` 只說 `capability` 與 `qualityProfile`（`fast` / `balanced` /
@@ -262,18 +280,34 @@ POST /api/aios/invoke {capability: "cancel_job"}
 | `packages/protocol/src/version.test.ts` | 瀏覽器安全版本模組不漂移 |
 | `packages/semantic/src/semantic.test.ts` | 檢索、主題、精華、受控脈絡 |
 | `packages/project-store/src/aios-store.test.ts` | 冪等、活動、AIOS run（記憶體＋SQLite＋重啟） |
-| `packages/agent/src/aios-orchestrator.test.ts` | 真實 HTTP 的 CUTOS→AIOS 方向 |
+| `packages/agent/src/aios-orchestrator.test.ts` | 真實 HTTP 的 CUTOS→AIOS 客戶端行為（逾時、重試、中止） |
+| `packages/agent/src/aios-orchestrator.contract.test.ts` | 重播 **ai_os 錄下的真實流量**，驗證 CUTOS→AIOS 合約 |
 | `apps/web/server/aios-bridge.test.ts` | 完整治理管線（含真實 FFmpeg 的剪輯循環） |
 | `apps/web/server/aios-http.test.ts` | 真實 HTTP 的 13 個 contract 情境＋錄製 fixtures |
 
-### 跨 repo contract 檔
+### 跨 repo contract 檔（兩個方向各一份）
 
-`docs/contract/cutos.agent.v2.fixtures.json` 由 `aios-http.test.ts` 對 production
-handler 錄下真實 HTTP 流量產生，由 ai_os 以真實 client 重播。重新產生：
+| 檔案 | 誰錄的 | 誰重播 |
+| --- | --- | --- |
+| `docs/contract/cutos.agent.v2.fixtures.json` | CUTOS `aios-http.test.ts` | ai_os `cutosContract.test.ts` |
+| `docs/contract/aios.cutos.v2.inbound.fixtures.json` | ai_os `cutosInboundRuns.pg.test.ts`（真實 PostgreSQL） | CUTOS `aios-orchestrator.contract.test.ts` |
+
+兩份都**確定性**：id 與時間戳在寫入前正規化。這不是潔癖——第一版每跑一次測試就
+重寫 284 行，工作區永遠是髒的，而兩個 repo 的副本必然不同，等於讓這個「跨 repo
+成品」失去它唯一的用處。
+
+而且 fixture 現在記了 `protocolSourceSha256`：ai_os 會對**自己那份**
+`shared/cutosProtocol.ts` 取雜湊來比對。以前 `PROTOCOL_CONTRACT_FINGERPRINT` 只是
+同 repo 的自我一致性檢查——只鏡射一半時兩邊都還是綠的；現在沒收到的那一邊會紅。
 
 ```bash
+# CUTOS → ai_os
 pnpm vitest run apps/web/server/aios-http.test.ts
 cp docs/contract/cutos.agent.v2.fixtures.json ../ai_os/docs/contract/
+
+# ai_os → CUTOS
+(cd ../ai_os && RUN_PG_INTEGRATION=1 npx vitest run server/services/cutosInboundRuns.pg.test.ts)
+cp ../ai_os/docs/contract/aios.cutos.v2.inbound.fixtures.json docs/contract/
 ```
 
 ### 範例

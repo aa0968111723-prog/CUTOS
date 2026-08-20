@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { APP_ERROR_CODES } from "../../server/errors.js";
 import { zhTW, type MessageKey } from "./zh-TW.js";
 import { activityLabel, errorMessage, operationLabel, t, translate } from "./index.js";
 
@@ -102,14 +103,10 @@ describe("i18n", () => {
     ];
     for (const op of opTypes) expect(operationLabel(op)).not.toBe(op);
 
-    const codes = [
-      "PROJECT_NOT_FOUND",
-      "MEDIA_UNSUPPORTED",
-      "UPLOAD_TOO_LARGE",
-      "STALE_EDIT_PLAN",
-      "PREVIEW_UNSUPPORTED",
-      "EXPORT_FAILED",
-    ];
-    for (const code of codes) expect(errorMessage(code)).not.toBe(t("error.UNKNOWN"));
+    // Exhaustive, not a sample: every code the server can emit must have copy,
+    // or the user sees the generic fallback instead of something actionable.
+    expect(APP_ERROR_CODES.length).toBeGreaterThan(15);
+    const uncovered = APP_ERROR_CODES.filter((code) => errorMessage(code) === t("error.UNKNOWN"));
+    expect(uncovered, `缺少繁中文案的錯誤碼：${uncovered.join("、")}`).toEqual([]);
   });
 });
