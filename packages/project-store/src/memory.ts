@@ -14,11 +14,19 @@ import {
   type ProjectPatch,
   type ProjectRecord,
   type ProjectRepository,
+  type ActivityRecord,
+  type ActivityRepository,
+  type AiosRunRecord,
+  type AiosRunRepository,
+  type IdempotencyClaim,
+  type IdempotencyRecord,
+  type IdempotencyRepository,
   type RunRecord,
   type RunRepository,
   type TimelineRepository,
   type VideoAnalysis,
 } from "./types.js";
+import { idempotencyRowId } from "./ids.js";
 
 const clone = <T>(v: T): T => structuredClone(v);
 
@@ -175,6 +183,147 @@ class MemoryRunRepository implements RunRepository {
   }
 }
 
+class MemoryIdempotencyRepository implements IdempotencyRepository {
+  private rows = new Map<string, IdempotencyRecord>();
+
+  claim(input: {
+    projectId: string;
+    capability: string;
+    idempotencyKey: string;
+    requestId: string;
+    argsFingerprint: string;
+    aiosRunId?: string | null;
+    aiosStepId?: string | null;
+    leaseMs: number;
+    now: number;
+  }): IdempotencyClaim {
+    const id = idempotencyRowId(input.projectId, input.capability, input.idempotencyKey);
+    const existing = this.rows.get(id);
+    if (existing) {
+      if (existing.argsFingerprint !== input.argsFingerprint) {
+        // Same key, different effect: refuse rather than silently overwrite.
+        return { state: "in_progress", record: clone({ ...existing, status: "in_progress" }) };
+      }
+      if (existing.status === "completed") return { state: "completed", record: clone(existing) };
+      if (existing.status === "failed") return { state: "failed", record: clone(existing) };
+      if ((existing.leaseExpiresAt ?? 0) > input.now) {
+        return { state: "in_progress", record: clone(existing) };
+      }
+      // The previous attempt's lease expired (process crashed) - reclaim it.
+      const reclaimed: IdempotencyRecord = {
+        ...existing,
+        requestId: input.requestId,
+        updatedAt: input.now,
+        leaseExpiresAt: input.now + input.leaseMs,
+      };
+      this.rows.set(id, clone(reclaimed));
+      return { state: "acquired", record: clone(reclaimed) };
+    }
+    const record: IdempotencyRecord = {
+      id,
+      projectId: input.projectId,
+      capability: input.capability,
+      idempotencyKey: input.idempotencyKey,
+      requestId: input.requestId,
+      argsFingerprint: input.argsFingerprint,
+      status: "in_progress",
+      errorCode: null,
+      timelineRevision: null,
+      aiosRunId: input.aiosRunId ?? null,
+      aiosStepId: input.aiosStepId ?? null,
+      createdAt: input.now,
+      updatedAt: input.now,
+      leaseExpiresAt: input.now + input.leaseMs,
+    };
+    this.rows.set(id, clone(record));
+    return { state: "acquired", record: clone(record) };
+  }
+
+  complete(id: string, result: unknown, timelineRevision: number | null, now: number): void {
+    const row = this.rows.get(id);
+    if (!row) return;
+    this.rows.set(id, clone({
+      ...row,
+      status: "completed",
+      result,
+      timelineRevision,
+      updatedAt: now,
+      leaseExpiresAt: null,
+    }));
+  }
+
+  fail(id: string, errorCode: string, now: number): void {
+    const row = this.rows.get(id);
+    if (!row) return;
+    this.rows.set(id, clone({ ...row, status: "failed", errorCode, updatedAt: now, leaseExpiresAt: null }));
+  }
+
+  release(id: string, now: number): void {
+    const row = this.rows.get(id);
+    if (!row || row.status !== "in_progress") return;
+    this.rows.set(id, clone({ ...row, updatedAt: now, leaseExpiresAt: null }));
+  }
+
+  get(projectId: string, capability: string, idempotencyKey: string): IdempotencyRecord | undefined {
+    const row = this.rows.get(idempotencyRowId(projectId, capability, idempotencyKey));
+    return row ? clone(row) : undefined;
+  }
+
+  deleteForProject(projectId: string): void {
+    for (const [id, row] of this.rows) if (row.projectId === projectId) this.rows.delete(id);
+  }
+}
+
+class MemoryActivityRepository implements ActivityRepository {
+  private rows: ActivityRecord[] = [];
+  private sequences = new Map<string, number>();
+
+  append(record: Omit<ActivityRecord, "sequence">): ActivityRecord {
+    const sequence = (this.sequences.get(record.projectId) ?? 0) + 1;
+    this.sequences.set(record.projectId, sequence);
+    const full: ActivityRecord = { ...record, sequence };
+    this.rows.push(clone(full));
+    return clone(full);
+  }
+
+  list(projectId: string, options: { afterSequence?: number; limit?: number } = {}): ActivityRecord[] {
+    return this.rows
+      .filter((r) => r.projectId === projectId && r.sequence > (options.afterSequence ?? 0))
+      .sort((a, b) => a.sequence - b.sequence)
+      .slice(0, options.limit ?? 200)
+      .map(clone);
+  }
+
+  deleteForProject(projectId: string): void {
+    this.rows = this.rows.filter((r) => r.projectId !== projectId);
+    this.sequences.delete(projectId);
+  }
+}
+
+class MemoryAiosRunRepository implements AiosRunRepository {
+  private rows = new Map<string, AiosRunRecord>();
+  save(record: AiosRunRecord): void {
+    this.rows.set(record.id, clone(record));
+  }
+  get(id: string): AiosRunRecord | undefined {
+    const row = this.rows.get(id);
+    return row ? clone(row) : undefined;
+  }
+  getByIdempotencyKey(key: string): AiosRunRecord | undefined {
+    for (const row of this.rows.values()) if (row.idempotencyKey === key) return clone(row);
+    return undefined;
+  }
+  listByProject(projectId: string): AiosRunRecord[] {
+    return [...this.rows.values()]
+      .filter((r) => r.projectId === projectId)
+      .map(clone)
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }
+  deleteForProject(projectId: string): void {
+    for (const [id, row] of this.rows) if (row.projectId === projectId) this.rows.delete(id);
+  }
+}
+
 export function createMemoryRepositories(): Repositories {
   return {
     projects: new MemoryProjectRepository(),
@@ -182,6 +331,9 @@ export function createMemoryRepositories(): Repositories {
     media: new MemoryMediaRepository(),
     analyses: new MemoryAnalysisRepository(),
     runs: new MemoryRunRepository(),
+    idempotency: new MemoryIdempotencyRepository(),
+    activity: new MemoryActivityRepository(),
+    aiosRuns: new MemoryAiosRunRepository(),
   };
 }
 

@@ -17,11 +17,19 @@ import {
   type ProjectPatch,
   type ProjectRecord,
   type ProjectRepository,
+  type ActivityRecord,
+  type ActivityRepository,
+  type AiosRunRecord,
+  type AiosRunRepository,
+  type IdempotencyClaim,
+  type IdempotencyRecord,
+  type IdempotencyRepository,
   type RunRecord,
   type RunRepository,
   type TimelineRepository,
   type VideoAnalysis,
 } from "./types.js";
+import { idempotencyRowId } from "./ids.js";
 
 const nodeRequire = createRequire(import.meta.url);
 const { DatabaseSync } = nodeRequire("node:sqlite") as { DatabaseSync: typeof DatabaseSyncType };
@@ -98,7 +106,64 @@ function migrate(db: Db): void {
     `);
   }
 
-  // Future migrations: `if (from < 2) { ... }` etc.
+  if (from < 2) {
+    // AIOS bridge durability. Written before the effect executes so a crashed
+    // CUTOS still knows an apply/export was claimed and must not be re-run
+    // blindly after restart.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS aios_idempotency (
+        id TEXT PRIMARY KEY,
+        projectId TEXT NOT NULL,
+        capability TEXT NOT NULL,
+        idempotencyKey TEXT NOT NULL,
+        requestId TEXT NOT NULL,
+        argsFingerprint TEXT NOT NULL,
+        status TEXT NOT NULL,
+        result TEXT,
+        errorCode TEXT,
+        timelineRevision INTEGER,
+        aiosRunId TEXT,
+        aiosStepId TEXT,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        leaseExpiresAt INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_idem_project ON aios_idempotency(projectId, capability);
+      CREATE TABLE IF NOT EXISTS aios_activity (
+        id TEXT PRIMARY KEY,
+        projectId TEXT NOT NULL,
+        sequence INTEGER NOT NULL,
+        at INTEGER NOT NULL,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL,
+        messageKey TEXT NOT NULL,
+        aiosRunId TEXT,
+        aiosStepId TEXT,
+        cutosAgentRunId TEXT,
+        cutosJobId TEXT,
+        metadata TEXT NOT NULL
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_activity_seq ON aios_activity(projectId, sequence);
+      CREATE TABLE IF NOT EXISTS aios_runs (
+        id TEXT PRIMARY KEY,
+        projectId TEXT NOT NULL,
+        aiosRunId TEXT,
+        status TEXT NOT NULL,
+        capability TEXT NOT NULL,
+        goal TEXT NOT NULL,
+        qualityProfile TEXT NOT NULL,
+        requestId TEXT NOT NULL,
+        idempotencyKey TEXT NOT NULL UNIQUE,
+        state TEXT,
+        errorCode TEXT,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_aios_runs_project ON aios_runs(projectId, createdAt);
+    `);
+  }
+
+  // Future migrations: `if (from < 3) { ... }` etc.
 
   db.prepare(
     "INSERT INTO meta (key, value) VALUES ('schemaVersion', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -381,6 +446,323 @@ class SqliteRunRepository implements RunRepository {
   }
 }
 
+interface IdempotencyRow {
+  id: string;
+  projectId: string;
+  capability: string;
+  idempotencyKey: string;
+  requestId: string;
+  argsFingerprint: string;
+  status: string;
+  result: string | null;
+  errorCode: string | null;
+  timelineRevision: number | null;
+  aiosRunId: string | null;
+  aiosStepId: string | null;
+  createdAt: number;
+  updatedAt: number;
+  leaseExpiresAt: number | null;
+}
+
+function rowToIdempotency(row: IdempotencyRow): IdempotencyRecord {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    capability: row.capability,
+    idempotencyKey: row.idempotencyKey,
+    requestId: row.requestId,
+    argsFingerprint: row.argsFingerprint,
+    status: row.status as IdempotencyRecord["status"],
+    result: row.result == null ? undefined : (JSON.parse(row.result) as unknown),
+    errorCode: row.errorCode,
+    timelineRevision: row.timelineRevision,
+    aiosRunId: row.aiosRunId,
+    aiosStepId: row.aiosStepId,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    leaseExpiresAt: row.leaseExpiresAt,
+  };
+}
+
+class SqliteIdempotencyRepository implements IdempotencyRepository {
+  constructor(private db: Db) {}
+
+  claim(input: {
+    projectId: string;
+    capability: string;
+    idempotencyKey: string;
+    requestId: string;
+    argsFingerprint: string;
+    aiosRunId?: string | null;
+    aiosStepId?: string | null;
+    leaseMs: number;
+    now: number;
+  }): IdempotencyClaim {
+    const id = idempotencyRowId(input.projectId, input.capability, input.idempotencyKey);
+    // INSERT-or-nothing is the atomic claim: two concurrent attempts cannot
+    // both believe they own the effect.
+    const inserted = this.db
+      .prepare(
+        `INSERT INTO aios_idempotency
+           (id, projectId, capability, idempotencyKey, requestId, argsFingerprint, status,
+            result, errorCode, timelineRevision, aiosRunId, aiosStepId, createdAt, updatedAt, leaseExpiresAt)
+         VALUES (?, ?, ?, ?, ?, ?, 'in_progress', NULL, NULL, NULL, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO NOTHING`,
+      )
+      .run(
+        id,
+        input.projectId,
+        input.capability,
+        input.idempotencyKey,
+        input.requestId,
+        input.argsFingerprint,
+        input.aiosRunId ?? null,
+        input.aiosStepId ?? null,
+        input.now,
+        input.now,
+        input.now + input.leaseMs,
+      );
+
+    const row = this.db
+      .prepare("SELECT * FROM aios_idempotency WHERE id = ?")
+      .get(id) as unknown as IdempotencyRow;
+    const record = rowToIdempotency(row);
+
+    if (Number(inserted.changes) === 1) return { state: "acquired", record };
+    if (record.argsFingerprint !== input.argsFingerprint) {
+      return { state: "in_progress", record };
+    }
+    if (record.status === "completed") return { state: "completed", record };
+    if (record.status === "failed") return { state: "failed", record };
+    if ((record.leaseExpiresAt ?? 0) > input.now) return { state: "in_progress", record };
+
+    const reclaimed = this.db
+      .prepare(
+        `UPDATE aios_idempotency
+            SET requestId = ?, updatedAt = ?, leaseExpiresAt = ?
+          WHERE id = ? AND status = 'in_progress'
+            AND (leaseExpiresAt IS NULL OR leaseExpiresAt <= ?)`,
+      )
+      .run(input.requestId, input.now, input.now + input.leaseMs, id, input.now);
+    if (Number(reclaimed.changes) !== 1) return { state: "in_progress", record };
+    const fresh = this.db
+      .prepare("SELECT * FROM aios_idempotency WHERE id = ?")
+      .get(id) as unknown as IdempotencyRow;
+    return { state: "acquired", record: rowToIdempotency(fresh) };
+  }
+
+  complete(id: string, result: unknown, timelineRevision: number | null, now: number): void {
+    this.db
+      .prepare(
+        `UPDATE aios_idempotency
+            SET status = 'completed', result = ?, timelineRevision = ?, updatedAt = ?, leaseExpiresAt = NULL
+          WHERE id = ?`,
+      )
+      .run(JSON.stringify(result ?? null), timelineRevision, now, id);
+  }
+
+  fail(id: string, errorCode: string, now: number): void {
+    this.db
+      .prepare(
+        `UPDATE aios_idempotency
+            SET status = 'failed', errorCode = ?, updatedAt = ?, leaseExpiresAt = NULL
+          WHERE id = ?`,
+      )
+      .run(errorCode, now, id);
+  }
+
+  release(id: string, now: number): void {
+    this.db
+      .prepare(
+        "UPDATE aios_idempotency SET updatedAt = ?, leaseExpiresAt = NULL WHERE id = ? AND status = 'in_progress'",
+      )
+      .run(now, id);
+  }
+
+  get(projectId: string, capability: string, idempotencyKey: string): IdempotencyRecord | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM aios_idempotency WHERE id = ?")
+      .get(idempotencyRowId(projectId, capability, idempotencyKey)) as unknown as
+      | IdempotencyRow
+      | undefined;
+    return row ? rowToIdempotency(row) : undefined;
+  }
+
+  deleteForProject(projectId: string): void {
+    this.db.prepare("DELETE FROM aios_idempotency WHERE projectId = ?").run(projectId);
+  }
+}
+
+interface ActivityRow {
+  id: string;
+  projectId: string;
+  sequence: number;
+  at: number;
+  kind: string;
+  status: string;
+  messageKey: string;
+  aiosRunId: string | null;
+  aiosStepId: string | null;
+  cutosAgentRunId: string | null;
+  cutosJobId: string | null;
+  metadata: string;
+}
+
+function rowToActivity(row: ActivityRow): ActivityRecord {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    sequence: row.sequence,
+    at: row.at,
+    kind: row.kind,
+    status: row.status,
+    messageKey: row.messageKey,
+    aiosRunId: row.aiosRunId,
+    aiosStepId: row.aiosStepId,
+    cutosAgentRunId: row.cutosAgentRunId,
+    cutosJobId: row.cutosJobId,
+    metadata: JSON.parse(row.metadata) as ActivityRecord["metadata"],
+  };
+}
+
+class SqliteActivityRepository implements ActivityRepository {
+  constructor(private db: Db) {}
+
+  append(record: Omit<ActivityRecord, "sequence">): ActivityRecord {
+    const row = this.db
+      .prepare("SELECT MAX(sequence) AS maxSequence FROM aios_activity WHERE projectId = ?")
+      .get(record.projectId) as unknown as { maxSequence: number | null };
+    const sequence = (row?.maxSequence ?? 0) + 1;
+    this.db
+      .prepare(
+        `INSERT INTO aios_activity
+           (id, projectId, sequence, at, kind, status, messageKey, aiosRunId, aiosStepId, cutosAgentRunId, cutosJobId, metadata)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.projectId,
+        sequence,
+        record.at,
+        record.kind,
+        record.status,
+        record.messageKey,
+        record.aiosRunId,
+        record.aiosStepId,
+        record.cutosAgentRunId,
+        record.cutosJobId,
+        JSON.stringify(record.metadata),
+      );
+    return { ...record, sequence };
+  }
+
+  list(projectId: string, options: { afterSequence?: number; limit?: number } = {}): ActivityRecord[] {
+    const rows = this.db
+      .prepare(
+        "SELECT * FROM aios_activity WHERE projectId = ? AND sequence > ? ORDER BY sequence ASC LIMIT ?",
+      )
+      .all(projectId, options.afterSequence ?? 0, options.limit ?? 200) as unknown as ActivityRow[];
+    return rows.map(rowToActivity);
+  }
+
+  deleteForProject(projectId: string): void {
+    this.db.prepare("DELETE FROM aios_activity WHERE projectId = ?").run(projectId);
+  }
+}
+
+interface AiosRunRow {
+  id: string;
+  projectId: string;
+  aiosRunId: string | null;
+  status: string;
+  capability: string;
+  goal: string;
+  qualityProfile: string;
+  requestId: string;
+  idempotencyKey: string;
+  state: string | null;
+  errorCode: string | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+function rowToAiosRun(row: AiosRunRow): AiosRunRecord {
+  return {
+    id: row.id,
+    projectId: row.projectId,
+    aiosRunId: row.aiosRunId,
+    status: row.status as AiosRunRecord["status"],
+    capability: row.capability,
+    goal: row.goal,
+    qualityProfile: row.qualityProfile,
+    requestId: row.requestId,
+    idempotencyKey: row.idempotencyKey,
+    state: row.state == null ? undefined : (JSON.parse(row.state) as unknown),
+    errorCode: row.errorCode,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+class SqliteAiosRunRepository implements AiosRunRepository {
+  constructor(private db: Db) {}
+
+  save(record: AiosRunRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO aios_runs
+           (id, projectId, aiosRunId, status, capability, goal, qualityProfile, requestId, idempotencyKey, state, errorCode, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           aiosRunId = excluded.aiosRunId,
+           status = excluded.status,
+           state = excluded.state,
+           errorCode = excluded.errorCode,
+           updatedAt = excluded.updatedAt`,
+      )
+      .run(
+        record.id,
+        record.projectId,
+        record.aiosRunId,
+        record.status,
+        record.capability,
+        record.goal,
+        record.qualityProfile,
+        record.requestId,
+        record.idempotencyKey,
+        record.state === undefined ? null : JSON.stringify(record.state),
+        record.errorCode,
+        record.createdAt,
+        record.updatedAt,
+      );
+  }
+
+  get(id: string): AiosRunRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM aios_runs WHERE id = ?").get(id) as unknown as
+      | AiosRunRow
+      | undefined;
+    return row ? rowToAiosRun(row) : undefined;
+  }
+
+  getByIdempotencyKey(key: string): AiosRunRecord | undefined {
+    const row = this.db
+      .prepare("SELECT * FROM aios_runs WHERE idempotencyKey = ?")
+      .get(key) as unknown as AiosRunRow | undefined;
+    return row ? rowToAiosRun(row) : undefined;
+  }
+
+  listByProject(projectId: string): AiosRunRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM aios_runs WHERE projectId = ? ORDER BY createdAt DESC")
+      .all(projectId) as unknown as AiosRunRow[];
+    return rows.map(rowToAiosRun);
+  }
+
+  deleteForProject(projectId: string): void {
+    this.db.prepare("DELETE FROM aios_runs WHERE projectId = ?").run(projectId);
+  }
+}
+
 export function createSqliteRepositories(filename: string): Repositories & { close: () => void } {
   const db = openDatabase(filename);
   return {
@@ -389,6 +771,9 @@ export function createSqliteRepositories(filename: string): Repositories & { clo
     media: new SqliteMediaRepository(db),
     analyses: new SqliteAnalysisRepository(db),
     runs: new SqliteRunRepository(db),
+    idempotency: new SqliteIdempotencyRepository(db),
+    activity: new SqliteActivityRepository(db),
+    aiosRuns: new SqliteAiosRunRepository(db),
     close: () => db.close(),
   };
 }

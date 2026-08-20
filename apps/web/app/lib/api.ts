@@ -139,10 +139,48 @@ export async function previewOperationManifest(id: string, opIndex: number): Pro
 
 export interface AiosHealth {
   configured: boolean;
+  /** cutos.agent.v2 fields; a v1 deployment simply omits them. */
+  protocolVersion?: string;
+  supportedProtocols?: string[];
+  manifestVersion?: number;
+  serverVersion?: string;
+  features?: string[];
   reachable?: boolean;
   status?: number;
   latencyMs?: number;
   error?: string;
+  /** Inbound AIOS kernel probe, when one is configured. */
+  kernel?: {
+    configured: boolean;
+    reachable?: boolean;
+    endpoint?: string;
+    latencyMs?: number;
+  };
+}
+
+export interface AiosActivityEvent {
+  id: string;
+  timestamp: string;
+  projectId: string;
+  kind: string;
+  status: string;
+  messageKey: string;
+  metadata: Record<string, string | number | boolean>;
+  aiosRunId?: string;
+  cutosJobId?: string;
+}
+
+/** Replayable cross-system activity feed (the AI-OS control plane view). */
+export async function fetchAiosActivity(
+  projectId: string,
+  afterSequence = 0,
+): Promise<{ events: AiosActivityEvent[]; lastSequence: number }> {
+  return parse(
+    await fetch(
+      `/api/aios/activity?projectId=${encodeURIComponent(projectId)}&afterSequence=${afterSequence}`,
+      { cache: "no-store" },
+    ),
+  );
 }
 
 export async function checkAiosHealth(): Promise<AiosHealth> {

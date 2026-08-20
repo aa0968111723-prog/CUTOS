@@ -1,0 +1,437 @@
+import { createServer, type Server } from "node:http";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { run } from "@cutos/media";
+import {
+  CUTOS_PROTOCOL_VERSION,
+  capabilityManifestSchema,
+  capabilityResponseSchema,
+  cutosHealthSchema,
+  isCapabilityFailure,
+  type CapabilityResponse,
+} from "@cutos/protocol";
+import type * as AiosBridge from "./aios-bridge.js";
+import type * as EditorService from "./editor-service.js";
+
+/**
+ * Real-HTTP contract test for the CUTOS side of cutos.agent.v2.
+ *
+ * The production handlers are mounted on a real `node:http` server and driven
+ * with a real `fetch` — no in-process shortcuts — because the peer in
+ * production is a different process in a different repository. What this test
+ * observes on the wire is written to `docs/contract/cutos.agent.v2.fixtures.json`,
+ * which the ai_os repository replays through its own real CutosClient. That
+ * committed file is the cross-repo contract artifact.
+ */
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const FIXTURE_PATH = join(HERE, "../../../docs/contract/cutos.agent.v2.fixtures.json");
+
+interface Exchange {
+  scenario: string;
+  request: { method: string; path: string; body?: unknown };
+  response: { status: number; body: unknown };
+}
+
+describe("CUTOS AIOS bridge over real HTTP", () => {
+  let dir = "";
+  let ffmpeg = false;
+  let server: Server;
+  let baseUrl = "";
+  let bridge: typeof AiosBridge;
+  let service: typeof EditorService;
+  const exchanges: Exchange[] = [];
+  let counter = 0;
+
+  beforeAll(async () => {
+    try {
+      await run("ffmpeg", ["-version"]);
+      ffmpeg = true;
+    } catch {
+      ffmpeg = false;
+    }
+    dir = await mkdtemp(join(tmpdir(), "cutos-aios-http-"));
+    process.env.CUTOS_DATA_DIR = dir;
+    process.env.CUTOS_STORE = "memory";
+    bridge = await import("./aios-bridge.js");
+    service = await import("./editor-service.js");
+
+    server = createServer((req, res) => {
+      void (async () => {
+        const url = new URL(req.url ?? "/", "http://localhost");
+        const send = (status: number, body: unknown) => {
+          const payload = JSON.stringify(body);
+          res.writeHead(status, { "content-type": "application/json" });
+          res.end(payload);
+        };
+        try {
+          // Auth mirrors a deployment behind a shared secret: any request that
+          // presents a wrong token is rejected before it can reach a capability.
+          const expected = process.env.CUTOS_TEST_API_KEY;
+          if (expected) {
+            const header = req.headers.authorization;
+            if (header !== `Bearer ${expected}`) {
+              send(401, { code: "UNAUTHORIZED", message: "Invalid CUTOS API key" });
+              return;
+            }
+          }
+          if (req.method === "GET" && url.pathname === "/api/aios/manifest") {
+            send(200, bridge.getAiosManifest());
+            return;
+          }
+          if (req.method === "GET" && url.pathname === "/api/aios/health") {
+            send(200, await bridge.checkAiosHealth());
+            return;
+          }
+          if (req.method === "POST" && url.pathname === "/api/aios/invoke") {
+            const chunks: Buffer[] = [];
+            for await (const chunk of req) chunks.push(chunk as Buffer);
+            const raw = Buffer.concat(chunks).toString("utf8");
+            const body = raw ? (JSON.parse(raw) as unknown) : {};
+            // The test server deliberately mirrors the Next.js route: a
+            // governance failure is a 200 carrying a typed error envelope.
+            const dispatched = await bridge.handleInvokeBody(body);
+            send(200, dispatched.response);
+            return;
+          }
+          if (req.method === "GET" && url.pathname === "/api/aios/slow") {
+            // Never responds; used to exercise the client's timeout path.
+            return;
+          }
+          send(404, { code: "NOT_FOUND", message: "no such route" });
+        } catch (error) {
+          send(500, {
+            code: "INTERNAL",
+            message: error instanceof Error ? error.message : "unexpected",
+          });
+        }
+      })();
+    });
+
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("server did not bind");
+    baseUrl = `http://127.0.0.1:${address.port}`;
+  }, 60_000);
+
+  afterAll(async () => {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    if (exchanges.length > 0) {
+      await mkdir(dirname(FIXTURE_PATH), { recursive: true });
+      await writeFile(
+        FIXTURE_PATH,
+        `${JSON.stringify(
+          {
+            $comment:
+              "Generated by apps/web/server/aios-http.test.ts from real HTTP traffic against the "
+              + "production CUTOS handlers. Replayed by ai_os (server/services/cutosContract.test.ts) "
+              + "to prove both repos agree on cutos.agent.v2. Regenerate with: pnpm vitest run "
+              + "apps/web/server/aios-http.test.ts",
+            protocolVersion: CUTOS_PROTOCOL_VERSION,
+            generator: "cutos",
+            exchanges,
+          },
+          null,
+          2,
+        )}\n`,
+      );
+    }
+    if (dir) await rm(dir, { recursive: true, force: true });
+  });
+
+  const correlation = (extra: Record<string, unknown> = {}) => ({
+    requestId: `http-req-${++counter}`,
+    aiosRunId: "aios-run-http",
+    aiosStepId: `step-${counter}`,
+    aiosProjectId: "aios-project-http",
+    ...extra,
+  });
+
+  async function call(
+    scenario: string,
+    path: string,
+    init?: { method?: string; body?: unknown; headers?: Record<string, string> },
+  ): Promise<{ status: number; body: unknown }> {
+    const method = init?.method ?? "GET";
+    const response = await fetch(`${baseUrl}${path}`, {
+      method,
+      ...(init?.body === undefined
+        ? {}
+        : { body: JSON.stringify(init.body), headers: { "content-type": "application/json", ...init?.headers } }),
+      ...(init?.headers && init?.body === undefined ? { headers: init.headers } : {}),
+    });
+    const body = (await response.json()) as unknown;
+    exchanges.push({
+      scenario,
+      request: { method, path, ...(init?.body === undefined ? {} : { body: init.body }) },
+      response: { status: response.status, body },
+    });
+    return { status: response.status, body };
+  }
+
+  async function invoke(
+    scenario: string,
+    body: unknown,
+    headers?: Record<string, string>,
+  ): Promise<CapabilityResponse> {
+    const result = await call(scenario, "/api/aios/invoke", {
+      method: "POST",
+      body,
+      ...(headers ? { headers } : {}),
+    });
+    return capabilityResponseSchema.parse(result.body);
+  }
+
+  async function waitForJob(jobId: string): Promise<void> {
+    for (let i = 0; i < 300; i += 1) {
+      const job = service.getJob(jobId);
+      if (job.status === "succeeded") return;
+      if (job.status === "failed" || job.status === "cancelled") {
+        throw new Error(`job ${jobId} ${job.status}: ${job.error}`);
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    throw new Error("job did not finish in time");
+  }
+
+  // 1 — health ---------------------------------------------------------------
+  it("serves health over HTTP", async () => {
+    const { status, body } = await call("health", "/api/aios/health");
+    expect(status).toBe(200);
+    const health = cutosHealthSchema.parse(body);
+    expect(health.protocolVersion).toBe("cutos.agent.v2");
+    expect(health.supportedProtocols).toContain("cutos.agent.v1");
+    expect(health.features).toContain("revision-guard");
+  });
+
+  // 2 — manifest -------------------------------------------------------------
+  it("serves a schema-valid manifest over HTTP", async () => {
+    const { status, body } = await call("manifest", "/api/aios/manifest");
+    expect(status).toBe(200);
+    const manifest = capabilityManifestSchema.parse(body);
+    expect(manifest.capabilities.length).toBeGreaterThan(15);
+  });
+
+  // 3-13 — the governed flow -------------------------------------------------
+  it("serves the whole governed flow over HTTP", async () => {
+    if (!ffmpeg) return;
+
+    const created = await invoke("create_project", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "create_sample_project",
+      args: {},
+      correlation: correlation({ idempotencyKey: "http-seed" }),
+    });
+    expect(created.ok).toBe(true);
+    const projectId = (created as { result: { projectId: string } }).result.projectId;
+
+    // 3 — read capability
+    const project = await invoke("read_capability", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "get_project",
+      args: { projectId },
+      correlation: correlation(),
+    });
+    expect(project.ok).toBe(true);
+
+    // 12 — long-running job + polling
+    const analyze = await invoke("analyze_job", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "analyze",
+      args: { projectId },
+      correlation: correlation({ idempotencyKey: `http-analyze:${projectId}` }),
+    });
+    const jobId = (analyze as { result: { jobId: string } }).result.jobId;
+    expect(analyze.correlation.cutosJobId).toBe(jobId);
+    await waitForJob(jobId);
+
+    const job = await invoke("job_polling", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "get_job",
+      args: { jobId },
+      correlation: correlation(),
+    });
+    expect((job as { result: { status: string } }).result.status).toBe("succeeded");
+
+    // 4 — semantic search
+    const search = await invoke("semantic_search", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "search_semantic",
+      args: { projectId, query: "speech", limit: 5 },
+      correlation: correlation(),
+    });
+    expect(search.ok).toBe(true);
+
+    const context = await invoke("semantic_context", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "build_semantic_context",
+      args: { projectId, query: "speech", maxRanges: 3 },
+      correlation: correlation(),
+    });
+    expect(context.ok).toBe(true);
+
+    // 5 — create plan
+    const planned = await invoke("create_plan", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "create_edit_plan",
+      args: { projectId, instruction: "刪掉超過 1 秒的停頓" },
+      correlation: correlation({ idempotencyKey: `http-plan:${projectId}` }),
+    });
+    expect(planned.ok).toBe(true);
+    const revision = (planned as { result: { timelineRevision: number } }).result.timelineRevision;
+
+    const verified = await invoke("verify_plan", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "verify_edit_plan",
+      args: { projectId },
+      correlation: correlation(),
+    });
+    expect((verified as { result: { ok: boolean } }).result.ok).toBe(true);
+
+    // 6 — preview
+    const preview = await invoke("preview_plan", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "preview_edit_plan",
+      args: { projectId },
+      correlation: correlation(),
+    });
+    expect(preview.ok).toBe(true);
+
+    // 8 — stale revision
+    const stale = await invoke("stale_revision", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "apply_edit_plan",
+      args: { projectId },
+      expectedRevision: revision + 42,
+      approval: { granted: true, grantedBy: "http-test" },
+      correlation: correlation({ idempotencyKey: `http-apply-stale:${projectId}` }),
+    });
+    expect(isCapabilityFailure(stale) && stale.error.code).toBe("STALE_TIMELINE_REVISION");
+
+    // approval gate
+    const needsApproval = await invoke("approval_required", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "apply_edit_plan",
+      args: { projectId },
+      expectedRevision: revision,
+      correlation: correlation({ idempotencyKey: `http-apply:${projectId}` }),
+    });
+    if (isCapabilityFailure(needsApproval)) {
+      expect(needsApproval.error.code).toBe("APPROVAL_REQUIRED");
+      expect(needsApproval.approvalRequest).toBeDefined();
+    }
+
+    // 7 — apply
+    const applied = await invoke("apply_plan", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "apply_edit_plan",
+      args: { projectId },
+      expectedRevision: revision,
+      approval: { granted: true, grantedBy: "http-test" },
+      correlation: correlation({ idempotencyKey: `http-apply:${projectId}` }),
+    });
+    expect(applied.ok).toBe(true);
+
+    // 9 — idempotency: the same key replays, it does not apply twice
+    const replay = await invoke("idempotent_replay", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "apply_edit_plan",
+      args: { projectId },
+      expectedRevision: revision,
+      approval: { granted: true, grantedBy: "http-test" },
+      correlation: correlation({ idempotencyKey: `http-apply:${projectId}` }),
+    });
+    expect(replay.ok && (replay as { replayed: boolean }).replayed).toBe(true);
+    expect(replay.correlation.timelineRevision).toBe(applied.correlation.timelineRevision);
+
+    // 13 — cancellation
+    const exported = await invoke("export_job", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "export",
+      args: { projectId },
+      approval: { granted: true, grantedBy: "http-test" },
+      correlation: correlation({ idempotencyKey: `http-export:${projectId}` }),
+    });
+    expect(exported.ok).toBe(true);
+    const exportJobId = (exported as { result: { jobId: string } }).result.jobId;
+
+    const cancelled = await invoke("cancel_job", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "cancel_job",
+      args: { jobId: exportJobId },
+      correlation: correlation({ idempotencyKey: `http-cancel:${exportJobId}` }),
+    });
+    expect(cancelled.ok).toBe(true);
+
+    // activity replay for the AIOS UI
+    const activity = await invoke("list_activity", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "list_activity",
+      args: { projectId, limit: 50 },
+      correlation: correlation(),
+    });
+    expect(activity.ok).toBe(true);
+    expect(
+      (activity as { result: { events: unknown[] } }).result.events.length,
+    ).toBeGreaterThan(0);
+  }, 180_000);
+
+  // 10 — protocol mismatch ---------------------------------------------------
+  it("rejects an unsupported protocol over HTTP", async () => {
+    const response = await invoke("protocol_mismatch", {
+      protocolVersion: "cutos.agent.v9",
+      capability: "list_projects",
+      args: {},
+      correlation: correlation(),
+    });
+    expect(isCapabilityFailure(response) && response.error.code).toBe("PROTOCOL_VERSION_MISMATCH");
+  });
+
+  it("rejects an unknown capability over HTTP", async () => {
+    const response = await invoke("capability_not_found", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "read_arbitrary_file",
+      args: { path: "/etc/passwd" },
+      correlation: correlation(),
+    });
+    expect(isCapabilityFailure(response) && response.error.code).toBe("CAPABILITY_NOT_FOUND");
+  });
+
+  it("rejects invalid arguments over HTTP", async () => {
+    const response = await invoke("validation_failed", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "get_project",
+      args: {},
+      correlation: correlation(),
+    });
+    expect(isCapabilityFailure(response) && response.error.code).toBe("VALIDATION_FAILED");
+  });
+
+  // 11 — unauthorized --------------------------------------------------------
+  it("rejects a request without the configured API key", async () => {
+    process.env.CUTOS_TEST_API_KEY = "correct-horse";
+    try {
+      const bad = await call("unauthorized", "/api/aios/manifest");
+      expect(bad.status).toBe(401);
+      const good = await fetch(`${baseUrl}/api/aios/manifest`, {
+        headers: { authorization: "Bearer correct-horse" },
+      });
+      expect(good.status).toBe(200);
+    } finally {
+      delete process.env.CUTOS_TEST_API_KEY;
+    }
+  });
+
+  // v1 compatibility over the wire ------------------------------------------
+  it("still answers a v1 request in the v1 shape", async () => {
+    const { status, body } = await call("v1_compatibility", "/api/aios/invoke", {
+      method: "POST",
+      body: { name: "list_projects", args: {} },
+    });
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ capability: "list_projects" });
+  });
+});

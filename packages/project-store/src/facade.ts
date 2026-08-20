@@ -2,8 +2,15 @@ import { randomUUID } from "node:crypto";
 import type { EditPlan } from "@cutos/edit-dsl";
 import { createTimeline } from "@cutos/timeline";
 import type {
+  ActivityRecord,
+  ActivityRepository,
+  AiosRunRecord,
+  AiosRunRepository,
   AnalysisRepository,
   CreateProjectInput,
+  IdempotencyClaim,
+  IdempotencyRecord,
+  IdempotencyRepository,
   MediaAsset,
   MediaRepository,
   OperationLogEntry,
@@ -24,6 +31,9 @@ export interface Repositories {
   media: MediaRepository;
   analyses: AnalysisRepository;
   runs: RunRepository;
+  idempotency: IdempotencyRepository;
+  activity: ActivityRepository;
+  aiosRuns: AiosRunRepository;
 }
 
 /**
@@ -38,6 +48,21 @@ export class ProjectStore {
 
   get media(): MediaRepository {
     return this.repos.media;
+  }
+
+  /** Durable idempotency receipts for AIOS-driven write capabilities. */
+  get idempotency(): IdempotencyRepository {
+    return this.repos.idempotency;
+  }
+
+  /** Durable cross-repo activity log. */
+  get activity(): ActivityRepository {
+    return this.repos.activity;
+  }
+
+  /** Durable handles for runs CUTOS submitted to AIOS. */
+  get aiosRuns(): AiosRunRepository {
+    return this.repos.aiosRuns;
   }
 
   // --- projects ---
@@ -77,7 +102,82 @@ export class ProjectStore {
     this.repos.media.deleteForProject(id);
     this.repos.analyses.deleteForProject(id);
     this.repos.runs.deleteForProject(id);
+    this.repos.idempotency.deleteForProject(id);
+    this.repos.activity.deleteForProject(id);
+    this.repos.aiosRuns.deleteForProject(id);
     this.repos.projects.delete(id);
+  }
+
+  // --- AIOS bridge ---
+
+  claimIdempotentEffect(input: {
+    projectId: string;
+    capability: string;
+    idempotencyKey: string;
+    requestId: string;
+    argsFingerprint: string;
+    aiosRunId?: string | null;
+    aiosStepId?: string | null;
+    leaseMs?: number;
+    now?: number;
+  }): IdempotencyClaim {
+    return this.repos.idempotency.claim({
+      ...input,
+      leaseMs: input.leaseMs ?? 120_000,
+      now: input.now ?? Date.now(),
+    });
+  }
+
+  completeIdempotentEffect(
+    id: string,
+    result: unknown,
+    timelineRevision: number | null,
+    now = Date.now(),
+  ): void {
+    this.repos.idempotency.complete(id, result, timelineRevision, now);
+  }
+
+  failIdempotentEffect(id: string, errorCode: string, now = Date.now()): void {
+    this.repos.idempotency.fail(id, errorCode, now);
+  }
+
+  releaseIdempotentEffect(id: string, now = Date.now()): void {
+    this.repos.idempotency.release(id, now);
+  }
+
+  getIdempotentEffect(
+    projectId: string,
+    capability: string,
+    idempotencyKey: string,
+  ): IdempotencyRecord | undefined {
+    return this.repos.idempotency.get(projectId, capability, idempotencyKey);
+  }
+
+  appendActivity(record: Omit<ActivityRecord, "sequence">): ActivityRecord {
+    return this.repos.activity.append(record);
+  }
+
+  listActivity(
+    projectId: string,
+    options?: { afterSequence?: number; limit?: number },
+  ): ActivityRecord[] {
+    return this.repos.activity.list(projectId, options);
+  }
+
+  saveAiosRun(record: AiosRunRecord): void {
+    this.repos.aiosRuns.save(record);
+  }
+
+  getAiosRun(id: string): AiosRunRecord | undefined {
+    return this.repos.aiosRuns.get(id);
+  }
+
+  getAiosRunByIdempotencyKey(key: string): AiosRunRecord | undefined {
+    return this.repos.aiosRuns.getByIdempotencyKey(key);
+  }
+
+  listAiosRuns(projectId: string): AiosRunRecord[] {
+    return this.repos.aiosRuns.listByProject(projectId);
   }
 
   // --- agent runs (opaque records) ---

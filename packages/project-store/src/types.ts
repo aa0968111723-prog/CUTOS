@@ -4,7 +4,7 @@ import { SourceMediaSchema, TimelineSchema } from "@cutos/timeline";
 import type { MediaAssetSchema, VideoAnalysisSchema } from "@cutos/media";
 
 /** Bump when the persisted shape changes; migrations key off this. */
-export const CURRENT_SCHEMA_VERSION = 1 as const;
+export const CURRENT_SCHEMA_VERSION = 2 as const;
 
 export const ProjectRecordSchema = z.object({
   id: z.string().min(1),
@@ -124,6 +124,128 @@ export interface RunRepository {
   save(record: RunRecord): void;
   get(id: string): RunRecord | undefined;
   listByProject(projectId: string): RunRecord[];
+  deleteForProject(projectId: string): void;
+}
+
+// ---------------------------------------------------------------------------
+// AIOS bridge durability (schema v2)
+//
+// The cross-repo contract requires CUTOS to be the durable side of three
+// things AIOS depends on to recover after either process restarts:
+//   1. idempotency receipts   — a retried write must not mutate twice,
+//   2. an activity event log  — the AIOS UI replays real progress, and
+//   3. AIOS run handles       — CUTOS→AIOS orchestration survives a restart.
+// ---------------------------------------------------------------------------
+
+export const IdempotencyRecordSchema = z.object({
+  /** projectId + capability + idempotencyKey, hashed into a single row key. */
+  id: z.string().min(1),
+  projectId: z.string().min(1),
+  capability: z.string().min(1),
+  idempotencyKey: z.string().min(1),
+  /** The request that first claimed this key (for conflict diagnostics). */
+  requestId: z.string().min(1),
+  /** Hash of the semantic arguments; a mismatch is an IDEMPOTENCY_CONFLICT. */
+  argsFingerprint: z.string().min(1),
+  status: z.enum(["in_progress", "completed", "failed"]),
+  /** Serialized capability result, present once completed. */
+  result: z.unknown().optional(),
+  /** Error code when the first attempt failed terminally. */
+  errorCode: z.string().nullable(),
+  /** Revision observed after the effect landed. */
+  timelineRevision: z.number().int().nonnegative().nullable(),
+  aiosRunId: z.string().nullable(),
+  aiosStepId: z.string().nullable(),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+  /** Lease expiry for an in-flight claim; a crashed claim is reclaimable. */
+  leaseExpiresAt: z.number().int().nonnegative().nullable(),
+});
+export type IdempotencyRecord = z.infer<typeof IdempotencyRecordSchema>;
+
+export interface IdempotencyClaim {
+  state: "acquired" | "in_progress" | "completed" | "failed";
+  record: IdempotencyRecord;
+}
+
+export interface IdempotencyRepository {
+  /**
+   * Atomically claim the key. `acquired` means the caller owns the effect and
+   * must execute it; `in_progress` means another attempt holds a live lease;
+   * `completed` returns the stored result so the caller replays instead of
+   * mutating a second time.
+   */
+  claim(input: {
+    projectId: string;
+    capability: string;
+    idempotencyKey: string;
+    requestId: string;
+    argsFingerprint: string;
+    aiosRunId?: string | null;
+    aiosStepId?: string | null;
+    leaseMs: number;
+    now: number;
+  }): IdempotencyClaim;
+  complete(id: string, result: unknown, timelineRevision: number | null, now: number): void;
+  fail(id: string, errorCode: string, now: number): void;
+  /** Release a claim without recording a terminal outcome (crash recovery). */
+  release(id: string, now: number): void;
+  get(projectId: string, capability: string, idempotencyKey: string): IdempotencyRecord | undefined;
+  deleteForProject(projectId: string): void;
+}
+
+export const ActivityRecordSchema = z.object({
+  id: z.string().min(1),
+  projectId: z.string().min(1),
+  /** Monotonic per-project sequence so clients can resume a stream. */
+  sequence: z.number().int().nonnegative(),
+  at: z.number().int().nonnegative(),
+  kind: z.string().min(1),
+  status: z.string().min(1),
+  messageKey: z.string().min(1),
+  aiosRunId: z.string().nullable(),
+  aiosStepId: z.string().nullable(),
+  cutosAgentRunId: z.string().nullable(),
+  cutosJobId: z.string().nullable(),
+  /** Scalar-only metadata; the writer strips free text before it gets here. */
+  metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])),
+});
+export type ActivityRecord = z.infer<typeof ActivityRecordSchema>;
+
+export interface ActivityRepository {
+  append(record: Omit<ActivityRecord, "sequence">): ActivityRecord;
+  list(projectId: string, options?: { afterSequence?: number; limit?: number }): ActivityRecord[];
+  deleteForProject(projectId: string): void;
+}
+
+export const AiosRunRecordSchema = z.object({
+  /** CUTOS-side handle id. */
+  id: z.string().min(1),
+  projectId: z.string().min(1),
+  /** Remote AIOS run id, once AIOS has accepted the submission. */
+  aiosRunId: z.string().nullable(),
+  status: z.enum([
+    "queued", "running", "waiting_approval", "waiting_external",
+    "completed", "failed", "cancelled",
+  ]),
+  capability: z.string().min(1),
+  goal: z.string(),
+  qualityProfile: z.string().min(1),
+  requestId: z.string().min(1),
+  idempotencyKey: z.string().min(1),
+  /** Last validated AiosRunState payload. */
+  state: z.unknown().optional(),
+  errorCode: z.string().nullable(),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+});
+export type AiosRunRecord = z.infer<typeof AiosRunRecordSchema>;
+
+export interface AiosRunRepository {
+  save(record: AiosRunRecord): void;
+  get(id: string): AiosRunRecord | undefined;
+  getByIdempotencyKey(key: string): AiosRunRecord | undefined;
+  listByProject(projectId: string): AiosRunRecord[];
   deleteForProject(projectId: string): void;
 }
 

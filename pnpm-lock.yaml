@@ -47,6 +47,12 @@ importers:
       '@cutos/project-store':
         specifier: workspace:*
         version: link:../../packages/project-store
+      '@cutos/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@cutos/semantic':
+        specifier: workspace:*
+        version: link:../../packages/semantic
       '@cutos/storage':
         specifier: workspace:*
         version: link:../../packages/storage
@@ -78,6 +84,9 @@ importers:
       '@cutos/edit-dsl':
         specifier: workspace:*
         version: link:../edit-dsl
+      '@cutos/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       zod:
         specifier: ^3.23.8
         version: 3.25.76
@@ -128,6 +137,24 @@ importers:
       '@cutos/timeline':
         specifier: workspace:*
         version: link:../timeline
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+
+  packages/protocol:
+    dependencies:
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
+
+  packages/semantic:
+    dependencies:
+      '@cutos/media':
+        specifier: workspace:*
+        version: link:../media
+      '@cutos/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       zod:
         specifier: ^3.23.8
         version: 3.25.76
