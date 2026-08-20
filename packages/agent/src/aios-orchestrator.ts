@@ -1,4 +1,5 @@
 import {
+  CUTOS_ERROR_CODES,
   CUTOS_PROTOCOL_VERSION,
   CUTOS_SUPPORTED_PROTOCOLS,
   aiosRunStateSchema,
@@ -28,10 +29,35 @@ export class AiosOrchestratorError extends Error {
     readonly code: CutosErrorCode,
     message: string,
     readonly status?: number,
+    /** zh-TW key from the peer, when it sent one. The UI renders this, never `message`. */
+    readonly messageKey?: string,
   ) {
     super(message);
     this.name = "AiosOrchestratorError";
   }
+}
+
+const KNOWN_ERROR_CODES = new Set<string>(CUTOS_ERROR_CODES);
+
+/**
+ * The peer's own error code wins over the HTTP status.
+ *
+ * The status is a lossy projection of the protocol's vocabulary: AIOS answers
+ * 409 for both `PROTOCOL_VERSION_MISMATCH` and `IDEMPOTENCY_CONFLICT`, and 428
+ * for `APPROVAL_REQUIRED`. Deriving the code from the status alone reported a
+ * version mismatch as an idempotency conflict — telling the operator to look at
+ * retries when the real fix was to upgrade one side — and turned an approval
+ * gate into `INTERNAL`. Carrying the code in the body is the whole reason the
+ * protocol has one, so it is read here and only fallen back on when absent.
+ */
+function peerError(payload: unknown, status: number): { code: CutosErrorCode; messageKey?: string } {
+  const record = payload as { error?: { code?: unknown; messageKey?: unknown } } | null;
+  const declared = record?.error?.code;
+  const messageKey = typeof record?.error?.messageKey === "string" ? record.error.messageKey : undefined;
+  if (typeof declared === "string" && KNOWN_ERROR_CODES.has(declared)) {
+    return { code: declared as CutosErrorCode, ...(messageKey ? { messageKey } : {}) };
+  }
+  return { code: statusToCode(status), ...(messageKey ? { messageKey } : {}) };
 }
 
 export interface AiosOrchestratorOptions {
@@ -139,10 +165,12 @@ export class HttpAiosOrchestrator implements AiosOrchestrator {
         const payload = text ? safeJson(text) : {};
         if (response.ok) return payload;
 
+        const peer = peerError(payload, response.status);
         const error = new AiosOrchestratorError(
-          statusToCode(response.status),
+          peer.code,
           sanitizeMessage(payload, response.status),
           response.status,
+          peer.messageKey,
         );
         // A 4xx (other than the transient ones) is the caller's problem: no retry.
         if (!RETRYABLE_STATUS.has(response.status) || attempt === this.maxAttempts) throw error;
@@ -288,10 +316,12 @@ function sanitizeMessage(payload: unknown, status: number): string {
   return `AIOS request failed with status ${status}`;
 }
 
+/** Last resort only — used when the peer sent no usable `error.code`. */
 function statusToCode(status: number): CutosErrorCode {
   if (status === 401) return "UNAUTHORIZED";
   if (status === 403) return "FORBIDDEN_PROJECT_SCOPE";
   if (status === 404) return "RUN_NOT_FOUND";
+  if (status === 428) return "APPROVAL_REQUIRED";
   if (status === 409) return "IDEMPOTENCY_CONFLICT";
   if (status === 408 || status === 504) return "TIMEOUT";
   if (status === 422 || status === 400) return "VALIDATION_FAILED";

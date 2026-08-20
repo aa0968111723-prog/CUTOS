@@ -219,6 +219,9 @@ export const zhTW = {
   "bridge.activity.approval": "需要你的確認",
   "bridge.activity.apply": "正在套用修改",
   "bridge.activity.export": "正在輸出影片",
+  "bridge.activity.preview": "正在產生預覽",
+  // 由 AI-OS 送回的步驟若對應不到已知工具，仍必須是一句繁中，不能露出原始鍵。
+  "bridge.activity.working": "處理中",
   "bridge.activity.cancelled": "已取消",
   "bridge.activity.empty": "還沒有跨系統活動。",
 
@@ -244,6 +247,7 @@ export const zhTW = {
   "error.EXPORT_FAILED": "輸出影片失敗，請重新嘗試。",
   "error.VALIDATION_FAILED": "輸入內容不正確。",
   "error.CONCURRENCY_CONFLICT": "專案剛剛有其他變更，請重新整理後再試。",
+  "error.AIOS_UNAVAILABLE": "目前無法連上 AI‑OS，請稍後再試或改用 CUTOS 自行執行。",
   "error.INTERNAL": "發生非預期的錯誤，請稍後再試。",
   "error.UNKNOWN": "發生問題，請稍後再試。",
 } as const;
