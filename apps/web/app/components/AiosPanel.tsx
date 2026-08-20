@@ -4,6 +4,21 @@ import { useState } from "react";
 import type { IntegrationDTO } from "../lib/types.js";
 import { checkAiosHealth, type AiosHealth } from "../lib/api.js";
 import { t, type MessageKey } from "../i18n/index.js";
+import { CUTOS_PROTOCOL_VERSION } from "@cutos/protocol/version";
+
+const PROTOCOL: string = CUTOS_PROTOCOL_VERSION;
+
+/** Bridge feature flag → zh-TW label. Unknown flags fall back to the raw name. */
+const FEATURE_KEYS: Record<string, MessageKey> = {
+  semantic: "aios.feature.semantic",
+  idempotency: "aios.feature.idempotency",
+  "revision-guard": "aios.feature.revisionGuard",
+  approval: "aios.feature.approval",
+  "activity-log": "aios.feature.activityLog",
+  "long-running-jobs": "aios.feature.longRunningJobs",
+  cancellation: "aios.feature.cancellation",
+  orchestrator: "aios.feature.orchestrator",
+};
 
 function providerLabel(provider: IntegrationDTO["provider"]): string {
   const key = `aios.provider${provider === "aios" ? "Aios" : provider === "openai" ? "Openai" : "Local"}` as MessageKey;
@@ -30,8 +45,21 @@ export function AiosPanel({ integration }: { integration: IntegrationDTO }) {
 
   const healthText = (): string | null => {
     if (!health) return null;
-    if (!health.configured) return t("aios.notConfigured");
-    return health.reachable ? t("aios.reachable", { ms: health.latencyMs ?? 0 }) : t("aios.unreachable");
+    // Kernel state is what "connected" means to the user; the v2 fields below
+    // describe the bridge CUTOS itself serves and are always present.
+    if (!health.kernel?.configured && !health.configured) return t("aios.notConfigured");
+    const reachable = health.kernel?.reachable ?? health.reachable;
+    const ms = health.kernel?.latencyMs ?? health.latencyMs ?? 0;
+    return reachable ? t("aios.reachable", { ms }) : t("aios.unreachable");
+  };
+
+  /** Protocol compatibility is a first-class state: never a silent fallback. */
+  const protocolCompatible = (): boolean =>
+    !health?.supportedProtocols || health.supportedProtocols.includes(PROTOCOL);
+
+  const featureLabel = (feature: string): string => {
+    const key = FEATURE_KEYS[feature];
+    return key ? t(key) : feature;
   };
   return (
     <div className="card aios-panel">
@@ -62,6 +90,23 @@ export function AiosPanel({ integration }: { integration: IntegrationDTO }) {
             </div>
           </>
         )}
+        <div>
+          <dt>{t("aios.protocol")}</dt>
+          <dd className="mono">
+            {health?.protocolVersion ?? PROTOCOL}
+            {health && !protocolCompatible() ? ` — ${t("aios.protocolIncompatible")}` : ""}
+          </dd>
+        </div>
+        <div>
+          <dt>{t("aios.orchestration")}</dt>
+          <dd>{connected ? t("aios.orchestrated") : t("aios.selfDriven")}</dd>
+        </div>
+        {health?.features?.length ? (
+          <div>
+            <dt>{t("aios.features")}</dt>
+            <dd>{health.features.map(featureLabel).join("、")}</dd>
+          </div>
+        ) : null}
       </dl>
       <p className="muted" style={{ fontSize: 12, margin: "8px 0 6px" }}>{t("aios.bridge")}</p>
       <div className="row">

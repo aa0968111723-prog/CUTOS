@@ -40,6 +40,56 @@ describe("i18n", () => {
     }
   });
 
+  it("covers the cutos.agent.v2 bridge status copy", () => {
+    // The AIOS panel renders these directly; a missing key would show the raw
+    // identifier to the user.
+    for (const key of [
+      "aios.protocol",
+      "aios.protocolIncompatible",
+      "aios.orchestration",
+      "aios.orchestrated",
+      "aios.waitingAios",
+      "aios.selfDriven",
+      "aios.features",
+      "aios.capabilityCount",
+    ] as const) {
+      expect(t(key), `missing copy for ${key}`).not.toBe(key);
+    }
+  });
+
+  it("labels every bridge feature flag the server advertises", () => {
+    // Mirrors FEATURES in apps/web/server/aios-bridge.ts.
+    const featureKeys = [
+      "aios.feature.semantic",
+      "aios.feature.idempotency",
+      "aios.feature.revisionGuard",
+      "aios.feature.approval",
+      "aios.feature.activityLog",
+      "aios.feature.longRunningJobs",
+      "aios.feature.cancellation",
+      "aios.feature.orchestrator",
+    ] as const;
+    for (const key of featureKeys) expect(t(key)).not.toBe(key);
+  });
+
+  it("covers the cross-system progress copy in Traditional Chinese", () => {
+    expect(t("bridge.activity.analyze")).toBe("正在分析影片");
+    expect(t("bridge.activity.transcript")).toBe("逐字稿已完成");
+    expect(t("bridge.activity.semanticSearch")).toBe("正在搜尋相關內容");
+    expect(t("bridge.activity.plan")).toBe("正在建立剪輯計畫");
+    expect(t("bridge.activity.verify")).toBe("正在驗證剪輯結果");
+    expect(t("bridge.activity.approval")).toBe("需要你的確認");
+    expect(t("bridge.activity.apply")).toBe("正在套用修改");
+    expect(t("bridge.activity.export")).toBe("正在輸出影片");
+    expect(t("bridge.activity.foundRanges", { count: 8 })).toBe("找到 8 個相關片段");
+  });
+
+  it("explains the v2 guards in zh-TW rather than leaking an error code", () => {
+    expect(t("bridge.staleRevision")).toContain("時間軸");
+    expect(t("bridge.approvalRequired")).toContain("確認");
+    expect(t("bridge.replayed")).toContain("未重複執行");
+  });
+
   it("covers every operation type and error code used by the app", () => {
     const opTypes = [
       "removeRange",
