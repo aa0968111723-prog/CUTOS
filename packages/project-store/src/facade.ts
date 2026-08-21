@@ -21,6 +21,7 @@ import type {
   RunRecord,
   RunRepository,
   TimelineRepository,
+  UploadSessionRepository,
   VideoAnalysis,
 } from "./types.js";
 import { ProjectNotFoundError } from "./types.js";
@@ -34,6 +35,7 @@ export interface Repositories {
   idempotency: IdempotencyRepository;
   activity: ActivityRepository;
   aiosRuns: AiosRunRepository;
+  uploads: UploadSessionRepository;
 }
 
 /**
@@ -63,6 +65,15 @@ export class ProjectStore {
   /** Durable handles for runs CUTOS submitted to AIOS. */
   get aiosRuns(): AiosRunRepository {
     return this.repos.aiosRuns;
+  }
+
+  /**
+   * Durable upload sessions. The server-side record of accepted bytes is what
+   * makes resume, over-size refusal and duplicate-finalize protection real
+   * rather than advisory.
+   */
+  get uploads(): UploadSessionRepository {
+    return this.repos.uploads;
   }
 
   // --- projects ---

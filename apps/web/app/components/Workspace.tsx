@@ -18,6 +18,7 @@ import { InspectorPanel } from "./InspectorPanel.js";
 import { AiosPanel } from "./AiosPanel.js";
 import { ExportPanel } from "./ExportPanel.js";
 import { JobCenter } from "./JobCenter.js";
+import { MediaStatusPanel } from "./MediaStatusPanel.js";
 
 export function Workspace() {
   const editor = useEditor();
@@ -36,6 +37,10 @@ export function Workspace() {
 
 function WorkspaceInner({ editor, project }: { editor: Editor; project: ProjectDTO }) {
   const [mode, setMode] = useState<"edited" | "original">("edited");
+  // A project exists before its media has been read. Rendering the player
+  // against a zero-length source would show a broken video rather than an
+  // honest "still processing", so the workspace waits for a real duration.
+  const mediaReady = project.mediaStatus === "ready";
   const sourceUrl = `/api/projects/${project.id}/source`;
 
   const originalManifest = useMemo<PreviewManifest>(
@@ -62,6 +67,16 @@ function WorkspaceInner({ editor, project }: { editor: Editor; project: ProjectD
 
   const effective = editor.previewOverride ?? (mode === "original" ? originalManifest : project.preview);
   const { videoRef, state, controls } = usePreview(effective, sourceUrl);
+
+  if (!mediaReady) {
+    return (
+      <MediaStatusPanel
+        project={project}
+        onRetryProbe={() => void editor.retryProbe(project.id)}
+        onBack={editor.closeProject}
+      />
+    );
+  }
 
   return (
     <>

@@ -97,12 +97,24 @@ export interface OperationLogDTO {
   operationCount: number;
 }
 
+/**
+ * Ingest state of a project's original media.
+ *
+ * `uploaded`/`probing` mean the bytes are safe but the metadata is not read
+ * yet; `failed` means the media is stored and unreadable — retryable without
+ * uploading again. The home screen renders these instead of blocking.
+ */
+export type MediaStatusDTO = "uploaded" | "probing" | "ready" | "failed";
+
 export interface ProjectSummaryDTO {
   id: string;
   name: string;
   updatedAt: number;
   timelineRevision: number;
   durationMs: number;
+  mediaStatus: MediaStatusDTO;
+  /** App error code from the last failed probe, for the retry affordance. */
+  mediaError: string | null;
 }
 
 export interface ProjectDTO {
@@ -111,6 +123,8 @@ export interface ProjectDTO {
   version: number;
   updatedAt: number;
   provider: string;
+  mediaStatus: MediaStatusDTO;
+  mediaError: string | null;
   timelineRevision: number;
   source: {
     durationMs: number;
@@ -150,4 +164,32 @@ export interface IntegrationDTO {
     model: string;
     backend: string;
   };
+}
+
+/** Server-issued upload session. Carries no server path, by design. */
+export interface UploadSessionDTO {
+  uploadId: string;
+  status: "pending" | "uploading" | "complete" | "finalized" | "aborted";
+  filename: string;
+  sizeBytes: number;
+  receivedBytes: number;
+  mimeType: string;
+  /** Bytes per chunk; the server derives it from the deployment's limits. */
+  chunkBytes: number;
+  expiresAt: number;
+  projectId: string | null;
+  errorCode: string | null;
+}
+
+export interface UploadFinalizeDTO {
+  projectId: string;
+  created: boolean;
+  probeJobId: string | null;
+}
+
+export interface UploadLimitsDTO {
+  maxUploadBytes: number;
+  maxRequestBytes: number;
+  chunkBytes: number;
+  allowedMimePrefixes: string[];
 }

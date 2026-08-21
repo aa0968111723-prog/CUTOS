@@ -31,10 +31,14 @@ export async function createSampleProject(): Promise<ProjectDTO> {
   return parse(await fetch("/api/projects/sample", { method: "POST" }));
 }
 
-export async function uploadProject(file: File): Promise<ProjectDTO> {
-  const form = new FormData();
-  form.append("file", file);
-  return parse(await fetch("/api/projects/upload", { method: "POST", body: form }));
+/**
+ * Ask the server to read a project's media again.
+ *
+ * The counterpart to keeping the asset on a probe failure: recovering costs a
+ * metadata read, not another upload.
+ */
+export async function retryMediaProbe(id: string): Promise<{ jobId: string }> {
+  return parse(await fetch(`/api/projects/${id}/probe`, { method: "POST" }));
 }
 
 export async function getProject(id: string): Promise<ProjectDTO> {
@@ -203,15 +207,26 @@ export const discardPlan = (id: string) => post(id, "discard");
 export const undo = (id: string) => post(id, "undo");
 export const redo = (id: string) => post(id, "redo");
 
-/** Poll a job until it finishes, reporting progress. */
+/**
+ * Poll a job until it finishes, reporting progress.
+ *
+ * Bounded on purpose: an unbounded poll is another way to leave the UI busy
+ * forever if a worker dies without recording a terminal status.
+ */
 export async function waitForJob(
   jobId: string,
   onProgress?: (job: JobDTO) => void,
+  options: { timeoutMs?: number; signal?: AbortSignal } = {},
 ): Promise<JobDTO> {
+  const deadline = Date.now() + (options.timeoutMs ?? 15 * 60_000);
   for (;;) {
+    if (options.signal?.aborted) throw new ApiRequestError("UPLOAD_CANCELLED", "cancelled");
     const job = await getJob(jobId);
     onProgress?.(job);
     if (job.status !== "running" && job.status !== "queued") return job;
+    if (Date.now() >= deadline) {
+      throw new ApiRequestError("JOB_FAILED", `job ${jobId} did not finish in time`);
+    }
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
 }

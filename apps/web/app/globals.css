@@ -690,3 +690,115 @@ button {
   font-size: 12px;
   word-break: break-all;
 }
+
+/* --- Upload progress ------------------------------------------------------
+   Mobile-first: the card fills the width, targets are finger-sized, and the
+   numbers stay readable at 360px. */
+.upload-card {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+
+.upload-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.upload-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.upload-size {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.upload-phase {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 8px;
+}
+
+.upload-bar {
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+  /* An explicitly visible track: on the light theme a white-alpha tint would
+     make an empty bar indistinguishable from no bar at all. */
+  background: #d7e0ee;
+  border: 1px solid var(--border);
+}
+
+.upload-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-strong));
+  /* Short enough that the bar tracks real bytes instead of gliding ahead of
+     them — a progress bar must never move when the network is not. */
+  transition: width 120ms linear;
+}
+
+.upload-numbers {
+  margin-top: 8px;
+  font-variant-numeric: tabular-nums;
+}
+
+.upload-error {
+  margin: 10px 0 0;
+  color: var(--danger);
+}
+
+.upload-hint {
+  margin-top: 8px;
+}
+
+.upload-actions {
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+.upload-actions .btn {
+  /* Comfortably tappable on a phone. */
+  min-height: 40px;
+}
+
+.badge-soft,
+.badge-warn {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.badge-soft {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.badge-warn {
+  background: #fdecec;
+  border: 1px solid #f5c2c2;
+  color: var(--danger);
+}
+
+@media (max-width: 480px) {
+  .upload-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+  }
+  .upload-actions .btn {
+    flex: 1 1 auto;
+  }
+}
