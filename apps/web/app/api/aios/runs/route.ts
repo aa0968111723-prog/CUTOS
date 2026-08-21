@@ -5,7 +5,22 @@ import {
   reconcileAiosRuns,
   submitAiosRun,
 } from "../../../../server/aios-orchestrator-service.js";
+import { assertAiosAuthorized, AiosUnauthorizedError, credentialFromHeaders } from "../../../../server/aios-auth.js";
 import { errorResponse, handleError, json } from "../../../../server/http.js";
+
+/**
+ * Same credential as `/api/aios/invoke`. Submitting a run spends the operator's
+ * AIOS budget, so an anonymous caller must not be able to queue work here.
+ */
+function guard(req: Request): Response | null {
+  try {
+    assertAiosAuthorized(credentialFromHeaders(req.headers));
+    return null;
+  } catch (error) {
+    if (!(error instanceof AiosUnauthorizedError)) throw error;
+    return errorResponse(401, "VALIDATION_FAILED", error.message);
+  }
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,6 +50,8 @@ const SubmitSchema = z.object({
 
 export async function POST(req: Request) {
   try {
+    const denied = guard(req);
+    if (denied) return denied;
     if (!isOrchestratorConfigured()) {
       // Not an error state: a CUTOS deployment with no AIOS is a valid one.
       return errorResponse(503, "AIOS_UNAVAILABLE", "AIOS orchestration is not configured.");
@@ -59,6 +76,8 @@ export async function POST(req: Request) {
  */
 export async function GET(req: Request) {
   try {
+    const denied = guard(req);
+    if (denied) return denied;
     const projectId = new URL(req.url).searchParams.get("projectId");
     if (!projectId) return errorResponse(400, "VALIDATION_FAILED", "projectId is required.");
     if (!isOrchestratorConfigured()) return json({ configured: false, runs: [] });

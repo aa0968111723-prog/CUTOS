@@ -66,14 +66,35 @@ describe.each(BACKENDS)("idempotency repository (%s)", (_name, make) => {
     expect(retry.record.timelineRevision).toBe(7);
   });
 
-  it("reclaims a lease abandoned by a crashed process", () => {
+  it("reclaims a lease abandoned by a crashed process, and says so", () => {
     const repos = make();
     repos.idempotency.claim(claim());
     const afterCrash = repos.idempotency.claim(
       claim({ requestId: "req-after-restart", now: 1_000 + 60_001 }),
     );
-    expect(afterCrash.state).toBe("acquired");
+    // NOT "acquired". The distinction is the whole safety property: a caller
+    // told "acquired" re-executes, and re-executing an apply/export that a
+    // dead attempt may already have performed is the double-edit this ledger
+    // exists to prevent. "reclaimed" says: the key is yours, reconcile first.
+    expect(afterCrash.state).toBe("reclaimed");
     expect(afterCrash.record.requestId).toBe("req-after-restart");
+  });
+
+  it("never reports a fresh claim as reclaimed", () => {
+    const repos = make();
+    expect(repos.idempotency.claim(claim()).state).toBe("acquired");
+  });
+
+  it("keeps reporting reclaimed until an outcome is recorded", () => {
+    const repos = make();
+    repos.idempotency.claim(claim());
+    const first = repos.idempotency.claim(claim({ requestId: "r2", now: 1_000 + 60_001 }));
+    expect(first.state).toBe("reclaimed");
+    // A second crash in the recovery attempt must not downgrade to "acquired".
+    const second = repos.idempotency.claim(claim({ requestId: "r3", now: 1_000 + 120_002 }));
+    expect(second.state).toBe("reclaimed");
+    repos.idempotency.complete(second.record.id, { applied: true }, 2, 200_000);
+    expect(repos.idempotency.claim(claim({ requestId: "r4", now: 300_000 })).state).toBe("completed");
   });
 
   it("refuses to reuse a key for different arguments", () => {
