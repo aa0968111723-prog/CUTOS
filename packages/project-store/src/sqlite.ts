@@ -548,7 +548,17 @@ class SqliteIdempotencyRepository implements IdempotencyRepository {
     const fresh = this.db
       .prepare("SELECT * FROM aios_idempotency WHERE id = ?")
       .get(id) as unknown as IdempotencyRow;
-    return { state: "acquired", record: rowToIdempotency(fresh) };
+    // `reclaimed`, not `acquired`: this key belonged to an attempt that died
+    // mid-effect. Reporting it as fresh is what made the caller re-apply an
+    // edit and re-render an export after a restart — the exact failure this
+    // table's docstring promises it prevents.
+    return {
+      state: "reclaimed",
+      record: rowToIdempotency(fresh),
+      // `record` already carries the NEW requestId; the dead attempt's id is
+      // captured from the row read before the reclaim update.
+      previousRequestId: record.requestId,
+    };
   }
 
   complete(id: string, result: unknown, timelineRevision: number | null, now: number): void {
@@ -571,12 +581,19 @@ class SqliteIdempotencyRepository implements IdempotencyRepository {
       .run(errorCode, now, id);
   }
 
-  release(id: string, now: number): void {
+  /**
+   * Give the key back when the caller KNOWS the effect did not run.
+   *
+   * Deleted, not merely un-leased: an expired lease means "an attempt died and
+   * we do not know what it did" and the next claim must report `reclaimed`,
+   * while an explicit release is positive evidence that nothing happened. A
+   * released row left in place would make every later attempt on that key look
+   * like crash recovery forever.
+   */
+  release(id: string, _now: number): void {
     this.db
-      .prepare(
-        "UPDATE aios_idempotency SET updatedAt = ?, leaseExpiresAt = NULL WHERE id = ? AND status = 'in_progress'",
-      )
-      .run(now, id);
+      .prepare("DELETE FROM aios_idempotency WHERE id = ? AND status = 'in_progress'")
+      .run(id);
   }
 
   get(projectId: string, capability: string, idempotencyKey: string): IdempotencyRecord | undefined {

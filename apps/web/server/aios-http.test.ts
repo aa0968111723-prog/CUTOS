@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { run } from "@cutos/media";
 import {
   CUTOS_PROTOCOL_VERSION,
+  PROTOCOL_CONTRACT,
   PROTOCOL_CONTRACT_FINGERPRINT,
   capabilityManifestSchema,
   capabilityResponseSchema,
@@ -29,6 +30,8 @@ import type * as EditorService from "./editor-service.js";
  * which the ai_os repository replays through its own real CutosClient. That
  * committed file is the cross-repo contract artifact.
  */
+
+const BRIDGE_KEY = "correct-horse-battery-staple";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_PATH = join(HERE, "../../../docs/contract/cutos.agent.v2.fixtures.json");
@@ -124,6 +127,8 @@ describe("CUTOS AIOS bridge over real HTTP", () => {
     dir = await mkdtemp(join(tmpdir(), "cutos-aios-http-"));
     process.env.CUTOS_DATA_DIR = dir;
     process.env.CUTOS_STORE = "memory";
+    // A real deployment credential, checked by the real guard in aios-auth.ts.
+    process.env.CUTOS_API_KEY = BRIDGE_KEY;
     bridge = await import("./aios-bridge.js");
     service = await import("./editor-service.js");
 
@@ -136,16 +141,12 @@ describe("CUTOS AIOS bridge over real HTTP", () => {
           res.end(payload);
         };
         try {
-          // Auth mirrors a deployment behind a shared secret: any request that
-          // presents a wrong token is rejected before it can reach a capability.
-          const expected = process.env.CUTOS_TEST_API_KEY;
-          if (expected) {
-            const header = req.headers.authorization;
-            if (header !== `Bearer ${expected}`) {
-              send(401, { code: "UNAUTHORIZED", message: "Invalid CUTOS API key" });
-              return;
-            }
-          }
+          // No auth simulation here any more. The first version of this file
+          // rejected a wrong token itself, which made the recorded
+          // `unauthorized` scenario a fiction: production had no check at all,
+          // and the fixture said otherwise. The credential is now handed to
+          // `handleInvokeBody`, which is where the real guard lives, so what
+          // this test records is what a deployment actually does.
           if (req.method === "GET" && url.pathname === "/api/aios/manifest") {
             send(200, bridge.getAiosManifest());
             return;
@@ -161,7 +162,10 @@ describe("CUTOS AIOS bridge over real HTTP", () => {
             const body = raw ? (JSON.parse(raw) as unknown) : {};
             // The test server deliberately mirrors the Next.js route: a
             // governance failure is a 200 carrying a typed error envelope.
-            const dispatched = await bridge.handleInvokeBody(body);
+            const dispatched = await bridge.handleInvokeBody(body, {
+              authorization: req.headers.authorization ?? null,
+              apiKey: (req.headers["x-api-key"] as string | undefined) ?? null,
+            });
             send(200, dispatched.response);
             return;
           }
@@ -187,7 +191,28 @@ describe("CUTOS AIOS bridge over real HTTP", () => {
 
   afterAll(async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
-    if (exchanges.length > 0) {
+    // Refuse to write a truncated artifact.
+    //
+    // The previous guard was `exchanges.length > 0`, which is satisfied by a
+    // single scenario. Thirteen of the scenarios live behind `if (!ffmpeg)
+    // return`, so on a machine without FFmpeg — or under any `-t` filter — the
+    // suite went green and then overwrote the committed 23-scenario contract
+    // with whatever the run happened to reach. The loss was silent here and
+    // only surfaced in ai_os, one `cp` later, as a wall of missing scenarios.
+    //
+    // The required list comes from the mirrored contract, so the completeness
+    // of the artifact is a property of the contract rather than of this file.
+    const recorded = new Set(exchanges.map((exchange) => exchange.scenario));
+    const missing = PROTOCOL_CONTRACT.contractScenarios.filter((name) => !recorded.has(name));
+    if (missing.length > 0) {
+      // Not a test failure: a filtered run is a legitimate thing to do. It just
+      // must not be allowed to destroy the committed evidence.
+      console.warn(
+        `[contract] fixture NOT rewritten — this run recorded ${recorded.size} scenario(s) and is `
+        + `missing ${missing.length}: ${missing.join(", ")}. `
+        + `Run the whole file with FFmpeg available to regenerate it.`,
+      );
+    } else if (exchanges.length > 0) {
       await mkdir(dirname(FIXTURE_PATH), { recursive: true });
       // The sha256 of the mirrored protocol file is what turns this artifact
       // into a real cross-repo check. `PROTOCOL_CONTRACT_FINGERPRINT` alone
@@ -239,15 +264,20 @@ describe("CUTOS AIOS bridge over real HTTP", () => {
   async function call(
     scenario: string,
     path: string,
-    init?: { method?: string; body?: unknown; headers?: Record<string, string> },
+    init?: { method?: string; body?: unknown; headers?: Record<string, string>; anonymous?: boolean },
   ): Promise<{ status: number; body: unknown }> {
     const method = init?.method ?? "GET";
+    const auth: Record<string, string> = init?.anonymous
+      ? {}
+      : { authorization: `Bearer ${BRIDGE_KEY}` };
     const response = await fetch(`${baseUrl}${path}`, {
       method,
-      ...(init?.body === undefined
-        ? {}
-        : { body: JSON.stringify(init.body), headers: { "content-type": "application/json", ...init?.headers } }),
-      ...(init?.headers && init?.body === undefined ? { headers: init.headers } : {}),
+      headers: {
+        ...auth,
+        ...(init?.body === undefined ? {} : { "content-type": "application/json" }),
+        ...init?.headers,
+      },
+      ...(init?.body === undefined ? {} : { body: JSON.stringify(init.body) }),
     });
     const body = (await response.json()) as unknown;
     exchanges.push({
@@ -497,17 +527,64 @@ describe("CUTOS AIOS bridge over real HTTP", () => {
   });
 
   // 11 — unauthorized --------------------------------------------------------
-  it("rejects a request without the configured API key", async () => {
-    process.env.CUTOS_TEST_API_KEY = "correct-horse";
+  it("refuses a capability call that presents no credential", async () => {
+    // The real guard, on the real endpoint, with no simulation in this file.
+    const bad = await call("unauthorized", "/api/aios/invoke", {
+      method: "POST",
+      anonymous: true,
+      body: {
+        protocolVersion: CUTOS_PROTOCOL_VERSION,
+        capability: "list_projects",
+        args: {},
+        correlation: correlation(),
+      },
+    });
+    const failure = capabilityResponseSchema.parse(bad.body);
+    expect(isCapabilityFailure(failure) && failure.error.code).toBe("UNAUTHORIZED");
+    expect(isCapabilityFailure(failure) && failure.error.retryable).toBe(false);
+    // A rejected caller learns nothing about this deployment.
+    expect(isCapabilityFailure(failure) && failure.activity).toEqual([]);
+  });
+
+  it("refuses a wrong credential, and accepts the right one", async () => {
+    const wrong = await fetch(`${baseUrl}/api/aios/invoke`, {
+      method: "POST",
+      headers: { authorization: "Bearer not-the-key", "content-type": "application/json" },
+      body: JSON.stringify({
+        protocolVersion: CUTOS_PROTOCOL_VERSION,
+        capability: "list_projects",
+        args: {},
+        correlation: correlation(),
+      }),
+    });
+    const wrongBody = capabilityResponseSchema.parse(await wrong.json());
+    expect(isCapabilityFailure(wrongBody) && wrongBody.error.code).toBe("UNAUTHORIZED");
+
+    const right = await invoke("auth_accepted", {
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "list_projects",
+      args: {},
+      correlation: correlation(),
+    });
+    expect(isCapabilityFailure(right)).toBe(false);
+  });
+
+  it("refuses everything when no key is configured at all", async () => {
+    // Fail closed: an operator who set no key has not decided to publish an
+    // unauthenticated edit endpoint. Defaulting to open is how the hole existed.
+    const saved = process.env.CUTOS_API_KEY;
+    delete process.env.CUTOS_API_KEY;
     try {
-      const bad = await call("unauthorized", "/api/aios/manifest");
-      expect(bad.status).toBe(401);
-      const good = await fetch(`${baseUrl}/api/aios/manifest`, {
-        headers: { authorization: "Bearer correct-horse" },
+      const response = await invoke("auth_unconfigured", {
+        protocolVersion: CUTOS_PROTOCOL_VERSION,
+        capability: "list_projects",
+        args: {},
+        correlation: correlation(),
       });
-      expect(good.status).toBe(200);
+      expect(isCapabilityFailure(response) && response.error.code).toBe("UNAUTHORIZED");
+      expect(isCapabilityFailure(response) && response.error.messageKey).toBe("aios.error.bridgeKeyMissing");
     } finally {
-      delete process.env.CUTOS_TEST_API_KEY;
+      process.env.CUTOS_API_KEY = saved;
     }
   });
 

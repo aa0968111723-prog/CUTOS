@@ -6,6 +6,7 @@ import { run } from "@cutos/media";
 import {
   CUTOS_PROTOCOL_VERSION,
   PROTOCOL_CONTRACT,
+  argsFingerprint,
   capabilityManifestSchema,
   capabilityResponseSchema,
   cutosSemanticContextSchema,
@@ -19,6 +20,10 @@ import type * as SemanticService from "./semantic-service.js";
  * The cutos.agent.v2 bridge: manifest correctness, v1 compatibility, and the
  * governance pipeline (validation → revision guard → approval → idempotency).
  */
+const BRIDGE_KEY = "bridge-test-key";
+/** What a caller presents at the bridge door. */
+const CREDENTIAL = { authorization: `Bearer ${BRIDGE_KEY}` };
+
 describe("AIOS bridge (cutos.agent.v2)", () => {
   let dir = "";
   let ffmpeg = false;
@@ -45,6 +50,7 @@ describe("AIOS bridge (cutos.agent.v2)", () => {
     dir = await mkdtemp(join(tmpdir(), "cutos-aios-"));
     process.env.CUTOS_DATA_DIR = dir;
     process.env.CUTOS_STORE = "memory";
+    process.env.CUTOS_API_KEY = BRIDGE_KEY;
     bridge = await import("./aios-bridge.js");
     service = await import("./editor-service.js");
     semantic = await import("./semantic-service.js");
@@ -445,7 +451,7 @@ describe("AIOS bridge (cutos.agent.v2)", () => {
   });
 
   it("dispatches both wire shapes through one entrypoint", async () => {
-    const v1 = await bridge.handleInvokeBody({ name: "list_projects", args: {} });
+    const v1 = await bridge.handleInvokeBody({ name: "list_projects", args: {} }, CREDENTIAL);
     expect(v1.protocol).toBe("v1");
 
     const v2 = await bridge.handleInvokeBody({
@@ -453,8 +459,106 @@ describe("AIOS bridge (cutos.agent.v2)", () => {
       capability: "list_projects",
       args: {},
       correlation: { requestId: "req-dispatch" },
-    });
+    }, CREDENTIAL);
     expect(v2.protocol).toBe("v2");
+  });
+
+  // ------------------------------------------------------ crash recovery --
+
+  it("makes a recovered effect visible instead of re-running it silently", async () => {
+    if (!ffmpeg) return;
+    const { getRuntime } = await import("./runtime.js");
+    const { store } = getRuntime();
+
+    const projectId = await service.importSample();
+    const key = `crash-${Date.now()}`;
+
+    // The state a process leaves behind when it dies between claiming a key and
+    // recording the outcome: an in_progress row whose lease has since expired.
+    const dead = store.claimIdempotentEffect({
+      projectId,
+      capability: "analyze",
+      idempotencyKey: key,
+      requestId: "req-that-died",
+      argsFingerprint: argsFingerprint({ projectId }),
+      aiosRunId: "run-that-died",
+      aiosStepId: "step-that-died",
+      leaseMs: 1,
+      now: Date.now() - 60_000,
+    });
+    expect(dead.state).toBe("acquired");
+
+    // The restart retries the same key. `analyze` does not touch the timeline,
+    // so no revision can reveal whether the dead attempt already ran — the only
+    // available answer is to run it again, which is safe because analysis
+    // overwrites rather than accumulates. What must NOT happen is that the
+    // re-run is indistinguishable from a first run.
+    const recovered = await bridge.invokeCapabilityV2({
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "analyze",
+      args: { projectId },
+      correlation: correlation({ idempotencyKey: key }),
+    });
+    expect(isCapabilityFailure(recovered)).toBe(false);
+    const events = isCapabilityFailure(recovered) ? [] : recovered.activity;
+    const recovery = events.find((event) => event.messageKey === "activity.effect.recovered");
+    expect(recovery, "a recovered effect must appear in the activity feed").toBeDefined();
+    expect(recovery?.metadata.priorRequestId).toBe("req-that-died");
+  }, 180_000);
+
+  it("still refuses an apply whose timeline moved while an attempt was dead", async () => {
+    if (!ffmpeg) return;
+    // The other half of crash recovery, and the reason the reclaim path does
+    // NOT need its own revision check: if the dead attempt had landed its
+    // write, the revision would have moved, and the ordinary guard answers
+    // before the claim is ever reached.
+    const projectId = await service.importSample();
+    const stale = await bridge.invokeCapabilityV2({
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "apply_edit_plan",
+      args: { projectId },
+      expectedRevision: 999,
+      approval: { granted: true, grantedBy: "test" },
+      correlation: correlation({ idempotencyKey: `stale-${Date.now()}` }),
+    });
+    expect(isCapabilityFailure(stale) && stale.error.code).toBe("STALE_TIMELINE_REVISION");
+  }, 180_000);
+
+  // ---------------------------------------------------------------- auth --
+
+  it("refuses a capability call with no credential", async () => {
+    // The endpoint had NO authentication at all: every governed capability,
+    // including apply_edit_plan and export, was reachable by any HTTP caller
+    // for any project id. ai_os had been sending the Bearer token the whole
+    // time; CUTOS never read it.
+    const denied = await bridge.handleInvokeBody({
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "list_projects",
+      args: {},
+      correlation: { requestId: "req-anon" },
+    });
+    expect(denied.protocol).toBe("v2");
+    const response = denied.response as { ok: boolean; error?: { code: string } };
+    expect(response.ok).toBe(false);
+    expect(response.error?.code).toBe("UNAUTHORIZED");
+  });
+
+  it("refuses a wrong credential", async () => {
+    const denied = await bridge.handleInvokeBody({
+      protocolVersion: CUTOS_PROTOCOL_VERSION,
+      capability: "list_projects",
+      args: {},
+      correlation: { requestId: "req-wrong" },
+    }, { authorization: "Bearer wrong-key" });
+    const response = denied.response as { ok: boolean; error?: { code: string } };
+    expect(response.ok).toBe(false);
+    expect(response.error?.code).toBe("UNAUTHORIZED");
+  });
+
+  it("refuses a v1 caller with no credential too", async () => {
+    // v1 must keep working, but "working" never meant "exempt from the door".
+    await expect(bridge.handleInvokeBody({ name: "list_projects", args: {} }))
+      .rejects.toMatchObject({ status: 401 });
   });
 
   // -------------------------------------------------------------- security --

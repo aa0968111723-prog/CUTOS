@@ -164,16 +164,40 @@ export const IdempotencyRecordSchema = z.object({
 export type IdempotencyRecord = z.infer<typeof IdempotencyRecordSchema>;
 
 export interface IdempotencyClaim {
-  state: "acquired" | "in_progress" | "completed" | "failed";
+  /**
+   * `acquired`  — a brand-new claim; nothing has run, execute freely.
+   * `reclaimed` — a PREVIOUS attempt held this key and its lease expired, i.e.
+   *               the process died mid-effect. The caller now owns the key
+   *               again, but it must NOT assume nothing happened: the earlier
+   *               attempt may have already applied the edit or rendered the
+   *               export before it died.
+   * `in_progress` — another attempt holds a live lease.
+   * `completed` / `failed` — a terminal outcome is on record; replay it.
+   *
+   * `acquired` and `reclaimed` were the same value until an audit found that
+   * the caller re-executed on both, which is precisely what this table's own
+   * docstring says must never happen ("a crashed CUTOS ... must not be re-run
+   * blindly after restart"). Keeping them distinct is what lets the caller
+   * reconcile instead of guessing.
+   */
+  state: "acquired" | "reclaimed" | "in_progress" | "completed" | "failed";
   record: IdempotencyRecord;
+  /**
+   * On `reclaimed`, the requestId of the attempt that died. `record.requestId`
+   * has already been overwritten with the new attempt's id by the time the
+   * caller sees it, so without this the recovery event could only report the
+   * request that is recovering — never the one that needs investigating.
+   */
+  previousRequestId?: string;
 }
 
 export interface IdempotencyRepository {
   /**
    * Atomically claim the key. `acquired` means the caller owns the effect and
-   * must execute it; `in_progress` means another attempt holds a live lease;
-   * `completed` returns the stored result so the caller replays instead of
-   * mutating a second time.
+   * must execute it; `reclaimed` means it owns a key a dead attempt left behind
+   * and must reconcile before acting; `in_progress` means another attempt holds
+   * a live lease; `completed` returns the stored result so the caller replays
+   * instead of mutating a second time.
    */
   claim(input: {
     projectId: string;

@@ -3,7 +3,23 @@ import {
   getAiosRun,
   resumeAiosRun,
 } from "../../../../../server/aios-orchestrator-service.js";
+import {
+  assertAiosAuthorized,
+  AiosUnauthorizedError,
+  credentialFromHeaders,
+} from "../../../../../server/aios-auth.js";
 import { errorResponse, handleError, json } from "../../../../../server/http.js";
+
+/** Same credential as the submit route: a run handle is not public state. */
+function guard(req: Request): Response | null {
+  try {
+    assertAiosAuthorized(credentialFromHeaders(req.headers));
+    return null;
+  } catch (error) {
+    if (!(error instanceof AiosUnauthorizedError)) throw error;
+    return errorResponse(401, "VALIDATION_FAILED", error.message);
+  }
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,8 +27,10 @@ export const dynamic = "force-dynamic";
 type Params = { params: { handleId: string } };
 
 /** Poll one AIOS run handle. */
-export async function GET(_req: Request, { params }: Params) {
+export async function GET(req: Request, { params }: Params) {
   try {
+    const denied = guard(req);
+    if (denied) return denied;
     return json(await getAiosRun(params.handleId));
   } catch (error) {
     return handleError(error);
@@ -27,6 +45,8 @@ export async function GET(_req: Request, { params }: Params) {
  */
 export async function POST(req: Request, { params }: Params) {
   try {
+    const denied = guard(req);
+    if (denied) return denied;
     const body = (await req.json().catch(() => ({}))) as { action?: unknown };
     if (body.action === "cancel") return json(await cancelAiosRun(params.handleId));
     if (body.action === "resume") return json(await resumeAiosRun(params.handleId));

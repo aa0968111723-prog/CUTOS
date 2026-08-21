@@ -20,6 +20,11 @@ import {
 import { checkAiosConnection, describeProvider, readAiosConfig } from "@cutos/agent";
 import { getRuntime } from "./runtime.js";
 import { HttpError } from "./errors.js";
+import {
+  assertAiosAuthorized,
+  AiosUnauthorizedError,
+  type AiosCredential,
+} from "./aios-auth.js";
 import { logger } from "./logger.js";
 import { recordActivity } from "./aios-activity.js";
 import { buildApprovalRequest, evaluateApproval, summarizeImpact } from "./aios-approval.js";
@@ -443,6 +448,8 @@ export async function invokeCapabilityV2(
   }
 
   let claimId: string | undefined;
+  /** Events produced while reconciling a crashed attempt, folded into the reply. */
+  const activityFromRecovery: AgentActivityEvent[] = [];
 
   if (needsIdempotency && idempotencyKey) {
     const claim = store.claimIdempotentEffect({
@@ -485,11 +492,48 @@ export async function invokeCapabilityV2(
         correlation,
       );
     }
+    if (claim.state === "reclaimed") {
+      // A previous attempt held this key and died mid-effect. The key is ours
+      // again, but "nothing happened" is an assumption, not a fact.
+      //
+      // For a timeline mutation the earlier attempt is already accounted for:
+      // the revision guard at step 5 ran before this claim, so reaching here at
+      // all proves the timeline still sits at the revision the caller expected
+      // — i.e. the dead attempt did NOT land its write, and re-executing is the
+      // correct thing to do. (Had it landed, the revision would have moved and
+      // step 5 would already have answered STALE_TIMELINE_REVISION.) An earlier
+      // draft of this fix re-checked the revision here; that check could never
+      // fire, and a test written to make it fire is what exposed it.
+      //
+      // What is genuinely unguarded is the keyed write that does NOT touch the
+      // timeline — `export` and `analyze`. Nothing about the project's state
+      // reveals whether the dead attempt already rendered or already analysed,
+      // so re-running is the only available answer. Both are re-runnable and
+      // overwrite rather than accumulate, so the outcome is correct; what was
+      // missing is that it happened silently. A recovery is now a visible event
+      // in the same feed the operator reads, distinguishable from a first run.
+      if (targetProjectId) {
+        activityFromRecovery.push(recordActivity({
+          projectId: targetProjectId,
+          kind: capability.activityKind,
+          status: "progress",
+          messageKey: "activity.effect.recovered",
+          aiosRunId: correlation.aiosRunId,
+          aiosStepId: correlation.aiosStepId,
+          metadata: {
+            capability: capability.name,
+            priorRequestId: claim.previousRequestId ?? claim.record.requestId,
+            mutatesTimeline: capability.mutatesTimeline,
+          },
+          now: now(),
+        }));
+      }
+    }
     claimId = claim.record.id;
   }
 
   // 8. Execute.
-  const activity: AgentActivityEvent[] = [];
+  const activity: AgentActivityEvent[] = [...activityFromRecovery];
   if (targetProjectId) {
     activity.push(recordActivity({
       projectId: targetProjectId,
@@ -710,9 +754,14 @@ export async function invokeAiosCapability(name: string, rawArgs: unknown) {
     args,
     correlation: { requestId, idempotencyKey: `v1:${requestId}` },
     ...(expectedRevision === undefined ? {} : { expectedRevision }),
-    // v1 has no approval channel; the legacy behaviour was "apply on request",
-    // so a v1 caller is treated as having confirmed at the API boundary.
-    approval: { granted: true, grantedBy: "cutos.agent.v1" },
+    // NO approval is granted here. The previous version hard-coded
+    // `granted: true` on the reasoning that "v1 has no approval channel", which
+    // made the legacy entrypoint a documented bypass of the integration's
+    // central safety guard: `{"name":"apply"}` applied an edit plan and
+    // `{"name":"export"}` rendered a file with no human ever confirming.
+    // Keeping v1 working does not mean keeping v1 able to skip the gate — a v1
+    // caller whose plan trips the impact policy now gets the legacy error for
+    // APPROVAL_REQUIRED and must come back through v2 with a real grant.
   });
 
   if (!response.ok) {
@@ -780,10 +829,53 @@ function legacyCode(code: CutosErrorCode) {
 }
 
 /** Parse and dispatch a raw `/api/aios/invoke` body (v1 or v2 shape). */
-export async function handleInvokeBody(body: unknown): Promise<
+export async function handleInvokeBody(
+  body: unknown,
+  /**
+   * The caller's credential. The guard lives here rather than in the Next route
+   * so that every transport — the route, a test server, a future worker — goes
+   * through the same door. A guard mounted only on the transport is the guard
+   * the next transport forgets, which is precisely how this repository ended up
+   * with an auth check in its test file and none in production.
+   */
+  credential?: AiosCredential,
+): Promise<
   | { protocol: "v2"; response: CapabilityResponse }
   | { protocol: "v1"; response: { capability: string; result: unknown } }
 > {
+  try {
+    assertAiosAuthorized(credential);
+  } catch (error) {
+    if (!(error instanceof AiosUnauthorizedError)) throw error;
+    // Answer in the shape the caller asked in: a v1 client still gets a v1
+    // error, a v2 client still gets a typed envelope it can read.
+    const looksV2 = looksLikeV2(body) || capabilityInvocationSchema.safeParse(body).success;
+    if (!looksV2) throw new HttpError(401, "VALIDATION_FAILED", error.message);
+    const raw = body as { capability?: unknown; correlation?: { requestId?: unknown } };
+    const stamp = new Date().toISOString();
+    return {
+      protocol: "v2",
+      response: {
+        protocolVersion: CUTOS_PROTOCOL_VERSION,
+        capability: typeof raw?.capability === "string" ? raw.capability : "unknown",
+        ok: false,
+        error: {
+          code: "UNAUTHORIZED",
+          message: error.message,
+          messageKey: error.messageKey,
+          retryable: false,
+        },
+        correlation: {
+          requestId: typeof raw?.correlation?.requestId === "string" ? raw.correlation.requestId : "unknown",
+          createdAt: stamp,
+          updatedAt: stamp,
+        },
+        // Deliberately empty: a rejected caller learns nothing about this
+        // deployment's activity, not even that the project it named exists.
+        activity: [],
+      },
+    };
+  }
   const v2 = capabilityInvocationSchema.safeParse(body);
   if (v2.success) {
     return {

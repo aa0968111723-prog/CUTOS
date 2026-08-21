@@ -209,7 +209,10 @@ class MemoryIdempotencyRepository implements IdempotencyRepository {
       if ((existing.leaseExpiresAt ?? 0) > input.now) {
         return { state: "in_progress", record: clone(existing) };
       }
-      // The previous attempt's lease expired (process crashed) - reclaim it.
+      // The previous attempt's lease expired (the process crashed mid-effect).
+      // Take the key back, but report `reclaimed` rather than `acquired`: the
+      // dead attempt may already have applied the edit or rendered the export.
+
       const reclaimed: IdempotencyRecord = {
         ...existing,
         requestId: input.requestId,
@@ -217,7 +220,11 @@ class MemoryIdempotencyRepository implements IdempotencyRepository {
         leaseExpiresAt: input.now + input.leaseMs,
       };
       this.rows.set(id, clone(reclaimed));
-      return { state: "acquired", record: clone(reclaimed) };
+      return {
+        state: "reclaimed",
+        record: clone(reclaimed),
+        previousRequestId: existing.requestId,
+      };
     }
     const record: IdempotencyRecord = {
       id,
@@ -258,10 +265,20 @@ class MemoryIdempotencyRepository implements IdempotencyRepository {
     this.rows.set(id, clone({ ...row, status: "failed", errorCode, updatedAt: now, leaseExpiresAt: null }));
   }
 
-  release(id: string, now: number): void {
+  /**
+   * Give the key back when the caller KNOWS the effect did not run.
+   *
+   * The row is deleted rather than left with a null lease, and the difference
+   * matters: an expired lease means "an attempt died and we do not know what it
+   * did", which the next claim must report as `reclaimed`. An explicit release
+   * is positive evidence that nothing happened, so the next claim is genuinely
+   * fresh. Leaving a released row behind would make every later attempt look
+   * like crash recovery forever.
+   */
+  release(id: string, _now: number): void {
     const row = this.rows.get(id);
     if (!row || row.status !== "in_progress") return;
-    this.rows.set(id, clone({ ...row, updatedAt: now, leaseExpiresAt: null }));
+    this.rows.delete(id);
   }
 
   get(projectId: string, capability: string, idempotencyKey: string): IdempotencyRecord | undefined {

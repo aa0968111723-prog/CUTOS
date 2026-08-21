@@ -43,7 +43,7 @@ TypeScript interface 不夠，因為對方是另一個 repo 的另一個 process
 `PROTOCOL_CONTRACT_FINGERPRINT`，兩個 repo 的測試斷言同一個值。單邊修改協定而未
 鏡像，兩邊測試都會紅。
 
-目前 fingerprint：`2f89e2c4e7af5abd1cb2deb84814c903720ab5b514711fedf6ca592cd5d07c1f`
+目前 fingerprint：`63168dcf9a648776eda4e34f61a2028c7fc1041b738d3428120366a2259a3775`
 
 版本協商由 `checkProtocolCompatibility()` 負責；**不相容時明確失敗**，不做 silent
 fallback。`packages/protocol/src/version.ts` 是不含 `node:crypto` 的版本常數，
@@ -246,6 +246,31 @@ POST /api/aios/invoke {capability: "cancel_job"}
 ---
 
 ## 設定
+
+### Outbound（AIOS 呼叫 CUTOS）——**必要**
+
+| 變數 | 說明 | 預設 |
+| --- | --- | --- |
+| `CUTOS_API_KEY` | 橋接金鑰。**未設定時 `/api/aios/invoke` 拒絕所有能力呼叫。** | — |
+
+ai_os 一直都在送 `Authorization: Bearer $CUTOS_API_KEY`；CUTOS 從來沒有讀它。
+在補上這道檢查之前，`POST /api/aios/invoke` **完全沒有認證**：任何能連到這台伺服器
+的人，都能對任何 projectId 呼叫 `apply_edit_plan`、`undo`、`redo`、`export`。而 v1
+路徑又寫死 `approval.granted = true`，所以 `{"name":"apply"}` 會直接套用剪輯、
+`{"name":"export"}` 會直接輸出——沒有任何人確認過。
+
+三個刻意的決定：
+
+1. **檢查在 `handleInvokeBody` 裡，不在 Next route 裡。** 只掛在傳輸層的守衛，是
+   下一個傳輸層會忘記的守衛——這個 repo 之所以會「測試檔有認證、正式環境沒有」，
+   正是因為如此。
+2. **沒設金鑰＝拒絕（fail closed）。** 沒設金鑰的維運者並沒有決定要對外公開一個
+   免認證的剪輯端點；「預設放行」正是這個洞的成因。
+3. **`GET /api/aios/health` 維持開放。** 它是版本握手，只回兩邊原始碼裡本來就公開
+   的常數。要求金鑰會讓「版本不相容」與「認證失敗」變成同一種不可達狀態，正是
+   協定禁止的靜默失敗。
+
+兩邊設同一個值：CUTOS 的 `CUTOS_API_KEY` 與 ai_os 的 `CUTOS_API_KEY`。
 
 ### Inbound（用 AIOS 當規劃器）
 
