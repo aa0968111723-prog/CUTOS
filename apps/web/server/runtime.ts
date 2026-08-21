@@ -43,6 +43,11 @@ export interface Runtime {
   runner: WorkerRunner;
   agentRuntime: AgentRuntime;
   agentRunStore: AgentRunStore;
+  /**
+   * Repair projects left mid-probe by a process that died. Exposed so a test
+   * can drive it deterministically instead of waiting on the interval.
+   */
+  reconcileStuckProbes: (now?: number) => number;
 }
 
 interface AnalyzePayload {
@@ -278,6 +283,42 @@ function buildRuntime(): Runtime {
     },
   };
 
+  /**
+   * Repair projects whose probe died without recording an outcome.
+   *
+   * The probe worker writes `mediaStatus: "failed"` from its own catch block —
+   * but a job can reach a terminal state without that catch ever running. If
+   * the process is killed mid-ffprobe (an OOM while probing a large phone
+   * video is the ordinary way this happens) the store's stale-recovery fails
+   * the job on the worker's behalf, and nothing ever touches the project row.
+   * It stays "probing" forever.
+   *
+   * That is unrecoverable from the UI, because the re-probe affordance only
+   * appears for "failed": the user sees 處理中 with no button that can move it
+   * forward, and no amount of waiting or reopening helps. Reconciling here
+   * turns a permanent lockout into a retryable failure.
+   */
+  function reconcileStuckProbes(now = Date.now()): number {
+    // A freshly created project is briefly "uploaded" before its probe is
+    // enqueued; the grace period keeps that window from being mistaken for a
+    // dead probe.
+    const graceMs = 30_000;
+    let repaired = 0;
+    for (const project of store.listProjects()) {
+      if (project.mediaStatus !== "probing" && project.mediaStatus !== "uploaded") continue;
+      if (now - project.updatedAt < graceMs) continue;
+      const jobs = jobStore.list({ kind: "probe", projectId: project.id });
+      const pending = jobs.some((job) => job.status === "queued" || job.status === "running");
+      if (pending) continue;
+      store.updateProject(project.id, { mediaStatus: "failed", mediaError: "PROBE_FAILED" });
+      repaired += 1;
+      logger.child({ projectId: project.id }).warn("probe left the project stuck; marked failed", {
+        previousStatus: project.mediaStatus,
+      });
+    }
+    return repaired;
+  }
+
   const runner = new WorkerRunner(jobStore, [probeWorker, analyzeWorker, exportWorker], {
     staleMs: config.jobStaleMs,
     onError: (error, job) =>
@@ -286,9 +327,22 @@ function buildRuntime(): Runtime {
       }),
   });
   runner.start();
+  // Startup is exactly when a previous process's abandoned probes need
+  // repairing, and the interval catches one that dies while we are running.
+  reconcileStuckProbes();
+  const reconcileTimer = setInterval(() => {
+    try {
+      reconcileStuckProbes();
+    } catch (error) {
+      logger.error("probe reconciliation failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }, 30_000);
+  reconcileTimer.unref?.();
   logger.info("runtime initialized", { storeMode: config.storeMode });
 
-  return { store, jobStore, storage, runner, agentRuntime, agentRunStore };
+  return { store, jobStore, storage, runner, agentRuntime, agentRunStore, reconcileStuckProbes };
 }
 
 const globalRef = globalThis as unknown as { __cutosRuntime?: Runtime };

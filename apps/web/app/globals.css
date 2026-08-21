@@ -802,3 +802,50 @@ button {
     flex: 1 1 auto;
   }
 }
+
+/* --- Media status banner ---------------------------------------------------
+   Sits inside the workspace rather than replacing it, so a project whose probe
+   is slow or failed is still reachable. */
+.media-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+
+.media-banner-failed {
+  background: #fdecec;
+  border-color: #f5c2c2;
+}
+
+.media-banner-text {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.media-banner-title {
+  margin: 0;
+}
+
+.media-banner-failed .media-banner-title {
+  color: var(--danger);
+}
+
+.media-banner-hint {
+  margin: 4px 0 0;
+  font-size: 13px;
+}
+
+@media (max-width: 480px) {
+  .media-banner .btn {
+    flex: 1 1 auto;
+    min-height: 40px;
+  }
+}
