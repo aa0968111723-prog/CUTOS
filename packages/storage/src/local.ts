@@ -4,21 +4,25 @@ import { createReadStream, createWriteStream } from "node:fs";
 import { copyFile, mkdir, readFile, rename, rm, stat, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { Readable } from "node:stream";
+import { LocalResumableUpload, stagingPathFor } from "./local-upload.js";
 import {
   StorageObjectNotFoundError,
+  UploadNotFoundError,
   assertValidKey,
   type ByteRange,
   type PutResult,
+  type ResumableUpload,
+  type ResumableUploadAdapter,
   type StatResult,
-  type StorageAdapter,
 } from "./types.js";
 
 /**
- * Filesystem-backed {@link StorageAdapter}. Objects live under `root`; the temp
- * workspace lives under `root/.tmp`. Keys map directly to relative paths after
+ * Filesystem-backed {@link ResumableUploadAdapter}. Objects live under `root`;
+ * the temp workspace lives under `root/.tmp` and in-flight resumable uploads
+ * under `root/.uploads`. Keys map directly to relative paths after
  * traversal-safe validation.
  */
-export class LocalStorageAdapter implements StorageAdapter {
+export class LocalStorageAdapter implements ResumableUploadAdapter {
   private readonly root: string;
   private readonly tempDir: string;
 
@@ -123,6 +127,28 @@ export class LocalStorageAdapter implements StorageAdapter {
       throw new StorageObjectNotFoundError(key);
     }
     return fn(path);
+  }
+
+  // --- resumable uploads ---
+
+  async createUpload(input: { uploadId: string; key: string }): Promise<ResumableUpload> {
+    const stagingPath = stagingPathFor(this.root, input.uploadId);
+    const finalPath = this.pathFor(input.key);
+    await mkdir(dirname(stagingPath), { recursive: true });
+    // Create the staging file so `size()` reports 0 rather than "not found":
+    // an empty session and a missing session are different states.
+    await writeFile(stagingPath, "", { flag: "w" });
+    return new LocalResumableUpload(input.uploadId, input.key, stagingPath, finalPath);
+  }
+
+  async resumeUpload(input: { uploadId: string; key: string }): Promise<ResumableUpload> {
+    const stagingPath = stagingPathFor(this.root, input.uploadId);
+    try {
+      await stat(stagingPath);
+    } catch {
+      throw new UploadNotFoundError(input.uploadId);
+    }
+    return new LocalResumableUpload(input.uploadId, input.key, stagingPath, this.pathFor(input.key));
   }
 
   tempFile(ext = ""): string {

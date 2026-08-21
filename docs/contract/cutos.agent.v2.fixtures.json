@@ -2129,6 +2129,8 @@
             "version": 0,
             "updatedAt": 1767225600000,
             "provider": "local-heuristic",
+            "mediaStatus": "ready",
+            "mediaError": null,
             "integration": {
               "provider": "local",
               "providerName": "local-heuristic",
@@ -3112,6 +3114,8 @@
             "version": 2,
             "updatedAt": 1767225600000,
             "provider": "local-heuristic",
+            "mediaStatus": "ready",
+            "mediaError": null,
             "integration": {
               "provider": "local",
               "providerName": "local-heuristic",
@@ -3437,6 +3441,8 @@
             "version": 2,
             "updatedAt": 1767225600000,
             "provider": "local-heuristic",
+            "mediaStatus": "ready",
+            "mediaError": null,
             "integration": {
               "provider": "local",
               "providerName": "local-heuristic",
@@ -4378,7 +4384,9 @@
               "name": "Demo clip (12s)",
               "updatedAt": 1767225600000,
               "timelineRevision": 1,
-              "durationMs": 12000
+              "durationMs": 12000,
+              "mediaStatus": "ready",
+              "mediaError": null
             }
           ],
           "correlation": {
@@ -4452,7 +4460,9 @@
               "name": "Demo clip (12s)",
               "updatedAt": 1767225600000,
               "timelineRevision": 1,
-              "durationMs": 12000
+              "durationMs": 12000,
+              "mediaStatus": "ready",
+              "mediaError": null
             }
           ]
         }

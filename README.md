@@ -97,6 +97,21 @@ Persistence and storage default to a git-ignored `.data/` directory (`CUTOS_DATA
 `CUTOS_LLM_PROVIDER=openai` (+ `CUTOS_OPENAI_API_KEY`) to route planning through an OpenAI-compatible
 endpoint instead of the offline deterministic planner.
 
+### Media upload
+
+Video is uploaded in bounded, resumable chunks and probed by a background job, so no request
+ever carries (or buffers) a whole file. Two limits, deliberately separate:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `CUTOS_MAX_UPLOAD_BYTES` | 500 MB | Largest **file** a user may upload. |
+| `CUTOS_MAX_REQUEST_BYTES` | 8 MB | Largest **single HTTP body**; keep it under the deployment's ingress limit. |
+| `CUTOS_UPLOAD_CHUNK_BYTES` | 5 MB | Chunk size sent to the browser (clamped to the request limit). |
+| `CUTOS_UPLOAD_SESSION_TTL_MS` | 6 h | How long an unfinished upload survives before it is swept. |
+
+Deploying behind a proxy (Zeabur, nginx, Cloudflare) means tuning `CUTOS_MAX_REQUEST_BYTES`,
+not the file limit. See [`docs/MEDIA_INGRESS.md`](docs/MEDIA_INGRESS.md).
+
 The web app runs fully offline by default via the deterministic local planner. To route
 planning through an OpenAI-compatible endpoint instead, set `CUTOS_LLM_PROVIDER=openai`,
 `CUTOS_OPENAI_API_KEY`, and optionally `CUTOS_OPENAI_BASE_URL` / `CUTOS_OPENAI_MODEL`.

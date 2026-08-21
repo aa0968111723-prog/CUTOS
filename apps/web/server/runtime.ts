@@ -28,9 +28,11 @@ import {
 } from "@cutos/project-store";
 import {
   exportTimeline,
+  probeMetadata,
   runAnalysis,
   type AnalysisSection,
 } from "@cutos/media";
+import { createTimeline } from "@cutos/timeline";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
 
@@ -50,6 +52,10 @@ interface AnalyzePayload {
 }
 
 interface ExportPayload {
+  projectId: string;
+}
+
+interface ProbePayload {
   projectId: string;
 }
 
@@ -157,6 +163,82 @@ function buildRuntime(): Runtime {
     },
   };
 
+  /**
+   * Read the real metadata of already-uploaded media.
+   *
+   * This used to run inline in the upload request, which is why a large file
+   * appeared to hang: the browser waited on ffprobe over a file the server was
+   * still writing. As a job it can retry, report progress, and — crucially —
+   * be re-run on a project whose media is already stored, so a probe failure
+   * never costs the user a second upload.
+   */
+  const probeWorker: Worker<ProbePayload, { durationMs: number }> = {
+    kind: "probe",
+    async handle(payload, ctx) {
+      const asset = store.getAssetByKind(payload.projectId, "original");
+      if (!asset) throw new Error("No original media asset for project");
+      await ctx.progress({ progress: 0.1, stage: "probing" });
+
+      let meta;
+      try {
+        meta = await storage.withLocalFile(asset.storageKey, (filePath) => probeMetadata(filePath));
+      } catch (error) {
+        // The bytes stay exactly where they are; only the project is marked.
+        store.updateProject(payload.projectId, {
+          mediaStatus: "failed",
+          mediaError: "PROBE_FAILED",
+        });
+        throw error;
+      }
+      if (!meta.hasVideo && !meta.hasAudio) {
+        store.updateProject(payload.projectId, {
+          mediaStatus: "failed",
+          mediaError: "MEDIA_UNSUPPORTED",
+        });
+        throw new Error("File has no video or audio stream");
+      }
+
+      const source = {
+        id: payload.projectId,
+        uri: `storage://${asset.storageKey}`,
+        durationMs: meta.durationMs,
+        hasAudio: meta.hasAudio,
+      };
+      store.updateProject(payload.projectId, {
+        source,
+        width: meta.width,
+        height: meta.height,
+        mediaStatus: "ready",
+        mediaError: null,
+      });
+      // The placeholder timeline was built against a zero-length source; now
+      // that the real duration is known it has to cover the whole clip. Only
+      // an untouched timeline is replaced — a re-probe must never discard
+      // edits the user already made.
+      const state = store.loadTimeline(payload.projectId);
+      const untouched =
+        !state || (state.revision === 0 && state.past.length === 0 && state.future.length === 0);
+      if (untouched) {
+        store.saveTimeline(payload.projectId, {
+          revision: 0,
+          current: createTimeline(source),
+          past: [],
+          future: [],
+        });
+      }
+      store.media.addAsset({
+        ...asset,
+        durationMs: meta.durationMs,
+        width: meta.width,
+        height: meta.height,
+        codec: meta.videoCodec,
+      });
+
+      await ctx.progress({ progress: 1, stage: "done" });
+      return { durationMs: meta.durationMs };
+    },
+  };
+
   const exportWorker: Worker<ExportPayload, { assetId: string; durationMs: number }> = {
     kind: "export",
     async handle(payload, ctx) {
@@ -196,7 +278,7 @@ function buildRuntime(): Runtime {
     },
   };
 
-  const runner = new WorkerRunner(jobStore, [analyzeWorker, exportWorker], {
+  const runner = new WorkerRunner(jobStore, [probeWorker, analyzeWorker, exportWorker], {
     staleMs: config.jobStaleMs,
     onError: (error, job) =>
       logger.child({ jobId: job.id, projectId: job.projectId ?? undefined }).error("job failed", {

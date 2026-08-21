@@ -4,7 +4,19 @@ import { SourceMediaSchema, TimelineSchema } from "@cutos/timeline";
 import type { MediaAssetSchema, VideoAnalysisSchema } from "@cutos/media";
 
 /** Bump when the persisted shape changes; migrations key off this. */
-export const CURRENT_SCHEMA_VERSION = 2 as const;
+export const CURRENT_SCHEMA_VERSION = 3 as const;
+
+/**
+ * Lifecycle of a project's original media, independent of the timeline.
+ *
+ * A project exists the moment its bytes are safely stored, before anything has
+ * probed them — that is what lets the upload request return in milliseconds and
+ * lets the home screen show the project as processing instead of blocking. A
+ * `failed` probe is explicitly NOT a lost upload: the asset is still there and
+ * the probe can be retried without asking the user to send the file again.
+ */
+export const MediaStatusSchema = z.enum(["uploaded", "probing", "ready", "failed"]);
+export type MediaStatus = z.infer<typeof MediaStatusSchema>;
 
 export const ProjectRecordSchema = z.object({
   id: z.string().min(1),
@@ -19,6 +31,10 @@ export const ProjectRecordSchema = z.object({
   source: SourceMediaSchema,
   width: z.number().int().positive().nullable(),
   height: z.number().int().positive().nullable(),
+  /** Media ingest state; see {@link MediaStatusSchema}. */
+  mediaStatus: MediaStatusSchema,
+  /** Stable app error code from the last failed probe, for retry UX. */
+  mediaError: z.string().nullable(),
 });
 export type ProjectRecord = z.infer<typeof ProjectRecordSchema>;
 
@@ -28,6 +44,8 @@ export interface CreateProjectInput {
   source: z.infer<typeof SourceMediaSchema>;
   width: number | null;
   height: number | null;
+  /** Defaults to `ready` so server-side imports (the demo clip) are unaffected. */
+  mediaStatus?: MediaStatus;
 }
 
 export interface ProjectPatch {
@@ -37,6 +55,8 @@ export interface ProjectPatch {
   height?: number | null;
   /** Set explicitly to override; otherwise store bumps it on timeline saves. */
   timelineRevision?: number;
+  mediaStatus?: MediaStatus;
+  mediaError?: string | null;
 }
 
 /** Serializable undo/redo history + current timeline; survives restart. */
@@ -271,6 +291,88 @@ export interface AiosRunRepository {
   getByIdempotencyKey(key: string): AiosRunRecord | undefined;
   listByProject(projectId: string): AiosRunRecord[];
   deleteForProject(projectId: string): void;
+}
+
+// ---------------------------------------------------------------------------
+// Upload sessions (schema v3)
+//
+// The server, not the client, is the authority on how many bytes an upload has
+// actually accepted. Keeping that durable is what makes the guarantees real:
+// a resumed upload asks the server where to continue, an over-sized upload is
+// refused against a recorded declaration rather than a header, and a finalize
+// that arrives twice (retry, double-tap, background/foreground churn on a
+// phone) resolves to the SAME project instead of creating a second one.
+// ---------------------------------------------------------------------------
+
+export const UploadSessionStatusSchema = z.enum([
+  /** Created; bytes may be appended. */
+  "pending",
+  /** At least one byte accepted. */
+  "uploading",
+  /** All declared bytes are staged; awaiting finalize. */
+  "complete",
+  /** Sealed into a project. Terminal, and idempotent to re-finalize. */
+  "finalized",
+  /** Cancelled by the user or expired by the sweeper. Terminal. */
+  "aborted",
+]);
+export type UploadSessionStatus = z.infer<typeof UploadSessionStatusSchema>;
+
+export const UploadSessionRecordSchema = z.object({
+  id: z.string().min(1),
+  status: UploadSessionStatusSchema,
+  /** Display name only. NEVER used to build a storage key or a path. */
+  filename: z.string(),
+  /** Size the client declared up front; the hard ceiling for this session. */
+  declaredBytes: z.number().int().nonnegative(),
+  /** Mime the client declared; treated as a hint, verified by sniffing. */
+  declaredMime: z.string(),
+  /** Bytes durably staged so far — the resume offset. */
+  receivedBytes: z.number().int().nonnegative(),
+  /** Server-issued staging key; opaque to the client. */
+  storageKey: z.string().min(1),
+  /** sha256 of the sealed object, set at finalize. */
+  checksum: z.string().nullable(),
+  /** Project created by finalize; replayed on a duplicate finalize. */
+  projectId: z.string().nullable(),
+  /** Asset created by finalize. */
+  assetId: z.string().nullable(),
+  /** Stable app error code when the session ended badly. */
+  errorCode: z.string().nullable(),
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+  expiresAt: z.number().int().nonnegative(),
+});
+export type UploadSessionRecord = z.infer<typeof UploadSessionRecordSchema>;
+
+export interface UploadSessionRepository {
+  create(record: UploadSessionRecord): UploadSessionRecord;
+  get(id: string): UploadSessionRecord | undefined;
+  update(id: string, patch: Partial<Omit<UploadSessionRecord, "id">>): UploadSessionRecord;
+  /**
+   * Atomically move a session to `finalized` and attach its project.
+   *
+   * Returns the session as it was BEFORE this call. A caller that sees a
+   * previous status of `finalized` lost the race (or is a retry) and must
+   * replay the recorded project rather than create a second one.
+   */
+  claimFinalize(
+    id: string,
+    projectId: string,
+    assetId: string,
+    checksum: string,
+    now: number,
+  ): { claimed: boolean; record: UploadSessionRecord };
+  /** Sessions past `expiresAt` that still hold staged bytes. */
+  listExpired(now: number): UploadSessionRecord[];
+  delete(id: string): void;
+}
+
+export class UploadSessionNotFoundError extends Error {
+  constructor(id: string) {
+    super(`Upload session ${id} not found`);
+    this.name = "UploadSessionNotFoundError";
+  }
 }
 
 export class ProjectNotFoundError extends Error {

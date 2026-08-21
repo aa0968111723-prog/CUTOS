@@ -18,6 +18,33 @@ export const APP_ERROR_CODES = [
   "MEDIA_MISSING",
   "UPLOAD_TOO_LARGE",
   "UPLOAD_INVALID",
+  /** The upload session id is unknown, already swept, or expired. */
+  "UPLOAD_NOT_FOUND",
+  /** The session was cancelled or timed out; its staged bytes are gone. */
+  "UPLOAD_ABORTED",
+  /** A chunk arrived for the wrong byte offset; the client must resume. */
+  "UPLOAD_OFFSET_MISMATCH",
+  /** Finalize was called before every declared byte had arrived. */
+  "UPLOAD_INCOMPLETE",
+  /** The connection stalled with bytes outstanding (client-side detection). */
+  "UPLOAD_STALLED",
+  /** The request took too long — a 408, or a client-side deadline. */
+  "UPLOAD_TIMEOUT",
+  /** The user cancelled. Not a failure; the UI must return to idle cleanly. */
+  "UPLOAD_CANCELLED",
+  /** The transport died mid-flight (reset, DNS, radio handover). */
+  "NETWORK_ERROR",
+  /**
+   * The page was frozen or reloaded mid-upload. Client-side only: the File
+   * handle cannot survive a discarded tab, so the user has to re-pick.
+   */
+  "UPLOAD_INTERRUPTED",
+  /** A gateway/proxy refused or gave up: 502 / 503 / 504. */
+  "SERVICE_UNAVAILABLE",
+  /** Bytes were accepted but could not be persisted. */
+  "STORAGE_FAILED",
+  /** The upload is intact but ffprobe could not read it; retryable. */
+  "PROBE_FAILED",
   "JOB_NOT_FOUND",
   "JOB_FAILED",
   "STALE_EDIT_PLAN",

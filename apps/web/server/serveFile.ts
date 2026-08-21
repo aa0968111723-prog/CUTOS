@@ -10,12 +10,15 @@ export async function serveStorageObject(
   storage: StorageAdapter,
   key: string,
   req: Request,
+  contentType = "video/mp4",
 ): Promise<Response> {
   const { size } = await storage.stat(key);
   const range = req.headers.get("range");
 
   const baseHeaders: Record<string, string> = {
-    "content-type": "video/mp4",
+    // The asset's recorded mime, not a hardcoded guess: a WebM or Matroska
+    // upload served as video/mp4 simply refuses to play in the preview.
+    "content-type": contentType,
     "accept-ranges": "bytes",
     "cache-control": "no-store",
   };

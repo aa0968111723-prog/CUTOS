@@ -4,6 +4,7 @@ export * from "./silence.js";
 export * from "./export.js";
 export * from "./sample.js";
 export * from "./asset.js";
+export * from "./sniff.js";
 export * from "./analysis.js";
 export * from "./waveform.js";
 export * from "./transcription.js";

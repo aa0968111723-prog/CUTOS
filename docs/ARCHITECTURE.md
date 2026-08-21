@@ -43,6 +43,7 @@ Import -> Analyze -> Converse -> Plan -> Preview -> Execute -> Verify -> Export
    - Semantic index over media
 
 6. **Media/render layer**
+   - Streaming, resumable media ingress (see [`MEDIA_INGRESS.md`](MEDIA_INGRESS.md))
    - Proxy generation
    - Waveforms/thumbnails
    - FFmpeg render workers
@@ -55,6 +56,9 @@ Import -> Analyze -> Converse -> Plan -> Preview -> Execute -> Verify -> Export
 - Every agent edit is inspectable and reversible.
 - Original media is immutable.
 - Long-running analysis/rendering is done by workers, not request handlers.
+- Media never passes through the server as a whole-file buffer. Uploads are chunked and
+  streamed to storage; probing, analysis and rendering are durable jobs, so a request handler
+  is never sized by, or blocked on, the length of a video.
 - The core is model-agnostic and supports OpenAI-compatible providers and AI-OS integration.
 - Mobile UX is agent-first; desktop can expose the full timeline.
 - Analysis results are cached and indexed so the same video is not repeatedly re-understood from scratch.

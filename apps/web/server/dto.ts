@@ -121,6 +121,8 @@ export function buildProjectDTO(id: string): ProjectDTO {
     version: project.version,
     updatedAt: project.updatedAt,
     provider: providerInfo.name,
+    mediaStatus: project.mediaStatus,
+    mediaError: project.mediaError,
     integration: {
       provider: providerInfo.provider,
       providerName: providerInfo.name,
@@ -183,5 +185,7 @@ export function buildProjectSummaries(): ProjectSummaryDTO[] {
     updatedAt: p.updatedAt,
     timelineRevision: p.timelineRevision,
     durationMs: p.source.durationMs,
+    mediaStatus: p.mediaStatus,
+    mediaError: p.mediaError,
   }));
 }

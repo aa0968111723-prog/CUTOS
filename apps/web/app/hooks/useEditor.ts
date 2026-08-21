@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PreviewManifest } from "@cutos/preview";
 import {
   ApiRequestError,
@@ -14,13 +14,19 @@ import {
   redo as apiRedo,
   rejectOperation,
   requestPlan,
+  retryMediaProbe,
   startAnalyze,
   startExport,
   undo as apiUndo,
-  uploadProject,
   waitForJob,
   type JobDTO,
 } from "../lib/api.js";
+import {
+  IDLE_UPLOAD_STATE,
+  ingestVideo,
+  waitForMedia,
+  type UploadState,
+} from "../lib/upload.js";
 import type { ProjectDTO, ProjectSummaryDTO } from "../lib/types.js";
 import { errorMessage, t } from "../i18n/index.js";
 
@@ -35,12 +41,19 @@ export interface Editor {
   messages: ChatMessage[];
   busy: string | null;
   job: JobDTO | null;
+  /** The upload state machine. Replaces the old single `busy` string. */
+  upload: UploadState;
   previewOverride: PreviewManifest | null;
   refreshProjects: () => Promise<void>;
   openProject: (id: string) => Promise<void>;
   closeProject: () => void;
   importSample: () => Promise<void>;
-  importUpload: (file: File) => Promise<void>;
+  startUpload: (file: File) => Promise<void>;
+  cancelUpload: () => void;
+  /** Clear a finished/failed upload so the picker is usable again. */
+  resetUpload: () => void;
+  /** Re-read media metadata without asking for the file again. */
+  retryProbe: (projectId: string) => Promise<void>;
   sendInstruction: (text: string) => Promise<void>;
   applyPlan: () => Promise<void>;
   discardPlan: () => Promise<void>;
@@ -53,13 +66,49 @@ export interface Editor {
   removeProject: (id: string) => Promise<void>;
 }
 
+/**
+ * Where an in-flight upload is remembered across a page freeze.
+ *
+ * Mobile browsers discard backgrounded tabs. The File handle cannot survive
+ * that, but the server-side session can: if every byte had already landed, the
+ * returning page finalizes it and the user gets their project instead of being
+ * told to upload 300 MB again.
+ */
+const PENDING_UPLOAD_KEY = "cutos.pendingUpload";
+
+interface PendingUpload {
+  uploadId: string;
+  projectId: string | null;
+  fileName: string;
+}
+
+function readPending(): PendingUpload | null {
+  try {
+    const raw = globalThis.sessionStorage?.getItem(PENDING_UPLOAD_KEY);
+    return raw ? (JSON.parse(raw) as PendingUpload) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePending(value: PendingUpload | null): void {
+  try {
+    if (value) globalThis.sessionStorage?.setItem(PENDING_UPLOAD_KEY, JSON.stringify(value));
+    else globalThis.sessionStorage?.removeItem(PENDING_UPLOAD_KEY);
+  } catch {
+    // Private mode / disabled storage: recovery is a bonus, never a requirement.
+  }
+}
+
 export function useEditor(): Editor {
   const [projects, setProjects] = useState<ProjectSummaryDTO[]>([]);
   const [project, setProject] = useState<ProjectDTO | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [job, setJob] = useState<JobDTO | null>(null);
+  const [upload, setUpload] = useState<UploadState>(IDLE_UPLOAD_STATE);
   const [previewOverride, setPreviewOverride] = useState<PreviewManifest | null>(null);
+  const uploadAbort = useRef<AbortController | null>(null);
 
   const say = useCallback((role: ChatMessage["role"], text: string) => {
     setMessages((prev) => [...prev, { role, text }]);
@@ -85,53 +134,209 @@ export function useEditor(): Editor {
     void refreshProjects();
   }, [refreshProjects]);
 
+  /**
+   * Analysis runs in the background.
+   *
+   * It deliberately does NOT set `busy`: the project is usable the moment its
+   * media is readable, and blocking the whole UI on silence detection is how
+   * "processing" turned into "stuck" in the first place. Progress shows in the
+   * job indicator instead.
+   */
   const runAnalysis = useCallback(
     async (id: string) => {
-      setBusy(t("import.analyzing"));
       try {
         const jobId = await startAnalyze(id, { thresholdDb: -30, minSilenceMs: 700 });
         await waitForJob(jobId, setJob);
         const updated = await getProject(id);
-        setProject(updated);
+        setProject((current) => (current?.id === id ? updated : current));
         const count = updated.analysis?.silences.length ?? 0;
         say("agent", count > 0 ? t("agent.foundPauses", { count }) : t("agent.noPauses"));
       } catch (error) {
         fail(error);
       } finally {
-        setBusy(null);
         setJob(null);
       }
     },
     [fail, say],
   );
 
-  const startProject = useCallback(
-    async (loader: () => Promise<ProjectDTO>, label: string) => {
-      setBusy(label);
-      setMessages([]);
-      setPreviewOverride(null);
-      try {
-        const created = await loader();
-        setProject(created);
-        say("agent", t("import.imported", { name: created.name }));
-        await refreshProjects();
-        await runAnalysis(created.id);
-      } catch (error) {
-        fail(error);
-        setBusy(null);
-      }
+  /** Open the freshly-ingested project and start analysis behind it. */
+  const enterProject = useCallback(
+    async (projectId: string) => {
+      const created = await getProject(projectId);
+      setProject(created);
+      say("agent", t("import.imported", { name: created.name }));
+      await refreshProjects();
+      void runAnalysis(created.id);
     },
-    [fail, refreshProjects, runAnalysis, say],
+    [refreshProjects, runAnalysis, say],
   );
 
-  const importSample = useCallback(
-    () => startProject(createSampleProject, t("import.reading")),
-    [startProject],
+  const importSample = useCallback(async () => {
+    setBusy(t("import.reading"));
+    setMessages([]);
+    setPreviewOverride(null);
+    try {
+      const created = await createSampleProject();
+      setProject(created);
+      say("agent", t("import.imported", { name: created.name }));
+      await refreshProjects();
+      void runAnalysis(created.id);
+    } catch (error) {
+      fail(error);
+    } finally {
+      // Unconditional: every exit from this call clears the busy flag.
+      setBusy(null);
+    }
+  }, [fail, refreshProjects, runAnalysis, say]);
+
+  const startUpload = useCallback(
+    async (file: File) => {
+      uploadAbort.current?.abort();
+      const controller = new AbortController();
+      uploadAbort.current = controller;
+      setMessages([]);
+      setPreviewOverride(null);
+
+      let final: UploadState;
+      try {
+        final = await ingestVideo(file, {
+          signal: controller.signal,
+          onState: (state) => {
+            setUpload(state);
+            if (state.uploadId) {
+              writePending({
+                uploadId: state.uploadId,
+                projectId: state.projectId,
+                fileName: state.fileName,
+              });
+            }
+          },
+        });
+      } finally {
+        // `ingestVideo` resolves rather than throws for every expected outcome,
+        // but the ref is cleared here regardless so a thrown bug cannot leave
+        // the UI believing an upload is still running.
+        if (uploadAbort.current === controller) uploadAbort.current = null;
+      }
+
+      if (final.phase === "ready" && final.projectId) {
+        writePending(null);
+        await enterProject(final.projectId);
+        return;
+      }
+      if (final.phase === "cancelled") {
+        writePending(null);
+        setUpload(IDLE_UPLOAD_STATE);
+        return;
+      }
+      // Failed. If the bytes made it, the project exists and is recoverable;
+      // show it rather than pretending the upload was lost.
+      say("error", errorMessage(final.errorCode ?? "UNKNOWN"));
+      await refreshProjects();
+      if (final.projectId) writePending(null);
+    },
+    [enterProject, refreshProjects, say],
   );
-  const importUpload = useCallback(
-    (file: File) => startProject(() => uploadProject(file), t("import.uploading")),
-    [startProject],
+
+  const cancelUpload = useCallback(() => {
+    uploadAbort.current?.abort();
+  }, []);
+
+  const resetUpload = useCallback(() => {
+    writePending(null);
+    setUpload(IDLE_UPLOAD_STATE);
+  }, []);
+
+  const retryProbe = useCallback(
+    async (projectId: string) => {
+      setUpload((prev) => ({ ...prev, phase: "probing", errorCode: null, projectId }));
+      try {
+        await retryMediaProbe(projectId);
+        const updated = await waitForMedia(projectId);
+        setProject((current) => (current?.id === projectId ? updated : current));
+        await refreshProjects();
+        if (updated.mediaStatus === "failed") {
+          setUpload((prev) => ({
+            ...prev,
+            phase: "failed",
+            errorCode: updated.mediaError ?? "PROBE_FAILED",
+            canRetryProbe: true,
+          }));
+          say("error", errorMessage(updated.mediaError ?? "PROBE_FAILED"));
+          return;
+        }
+        setUpload((prev) => ({ ...prev, phase: "ready", errorCode: null, canRetryProbe: false }));
+        await enterProject(projectId);
+      } catch (error) {
+        const code = error instanceof ApiRequestError ? error.code : "PROBE_FAILED";
+        setUpload((prev) => ({ ...prev, phase: "failed", errorCode: code, canRetryProbe: true }));
+        say("error", errorMessage(code));
+      }
+    },
+    [enterProject, refreshProjects, say],
   );
+
+  /**
+   * Recover an upload the browser interrupted (backgrounded tab, reload).
+   *
+   * Runs once on mount. It never blocks the UI: the picker stays usable while
+   * this resolves.
+   */
+  useEffect(() => {
+    const pending = readPending();
+    if (!pending) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        if (pending.projectId) {
+          const recovered = await waitForMedia(pending.projectId);
+          if (cancelled) return;
+          writePending(null);
+          if (recovered.mediaStatus === "ready") await enterProject(pending.projectId);
+          return;
+        }
+        const response = await fetch(`/api/uploads/${pending.uploadId}`, { cache: "no-store" });
+        if (!response.ok) {
+          writePending(null);
+          return;
+        }
+        const session = (await response.json()) as { status: string; projectId: string | null };
+        if (cancelled) return;
+        if (session.status === "finalized" && session.projectId) {
+          writePending(null);
+          await enterProject(session.projectId);
+          return;
+        }
+        if (session.status === "complete") {
+          // Every byte arrived before the page died: finish the job for them.
+          const finalized = await fetch(`/api/uploads/${pending.uploadId}/finalize`, {
+            method: "POST",
+          });
+          if (finalized.ok) {
+            const { projectId } = (await finalized.json()) as { projectId: string };
+            writePending(null);
+            if (!cancelled) await enterProject(projectId);
+            return;
+          }
+        }
+        // Partly uploaded with no File handle left: say so and let them
+        // re-pick, rather than showing a spinner for an upload that is over.
+        writePending(null);
+        setUpload({
+          ...IDLE_UPLOAD_STATE,
+          phase: "failed",
+          fileName: pending.fileName,
+          errorCode: "UPLOAD_INTERRUPTED",
+        });
+      } catch {
+        writePending(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [enterProject]);
 
   const openProject = useCallback(
     async (id: string) => {
@@ -261,12 +466,16 @@ export function useEditor(): Editor {
     messages,
     busy,
     job,
+    upload,
     previewOverride,
     refreshProjects,
     openProject,
     closeProject,
     importSample,
-    importUpload,
+    startUpload,
+    cancelUpload,
+    resetUpload,
+    retryProbe,
     sendInstruction,
     applyPlan,
     discardPlan,

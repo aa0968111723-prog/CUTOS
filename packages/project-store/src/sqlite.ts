@@ -27,8 +27,11 @@ import {
   type RunRecord,
   type RunRepository,
   type TimelineRepository,
+  type UploadSessionRecord,
+  type UploadSessionRepository,
   type VideoAnalysis,
 } from "./types.js";
+import { UploadSessionNotFoundError } from "./types.js";
 import { idempotencyRowId } from "./ids.js";
 
 const nodeRequire = createRequire(import.meta.url);
@@ -44,6 +47,11 @@ function openDatabase(filename: string): Db {
   db.exec("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
   migrate(db);
   return db;
+}
+
+function columnExists(db: Db, table: string, column: string): boolean {
+  const rows = db.prepare(`PRAGMA table_info(${table})`).all() as unknown as { name: string }[];
+  return rows.some((r) => r.name === column);
 }
 
 function migrate(db: Db): void {
@@ -163,7 +171,40 @@ function migrate(db: Db): void {
     `);
   }
 
-  // Future migrations: `if (from < 3) { ... }` etc.
+  if (from < 3) {
+    // Streaming upload ingress. `upload_sessions` is the server-side authority
+    // on how many bytes an upload has accepted, so resume, over-size refusal
+    // and duplicate-finalize protection all survive a restart.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS upload_sessions (
+        id TEXT PRIMARY KEY,
+        status TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        declaredBytes INTEGER NOT NULL,
+        declaredMime TEXT NOT NULL,
+        receivedBytes INTEGER NOT NULL,
+        storageKey TEXT NOT NULL,
+        checksum TEXT,
+        projectId TEXT,
+        assetId TEXT,
+        errorCode TEXT,
+        createdAt INTEGER NOT NULL,
+        updatedAt INTEGER NOT NULL,
+        expiresAt INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_uploads_expiry ON upload_sessions(expiresAt);
+    `);
+    // Projects predating streaming ingest were probed inside the request, so
+    // by definition their media is already readable.
+    if (!columnExists(db, "projects", "mediaStatus")) {
+      db.exec("ALTER TABLE projects ADD COLUMN mediaStatus TEXT NOT NULL DEFAULT 'ready';");
+    }
+    if (!columnExists(db, "projects", "mediaError")) {
+      db.exec("ALTER TABLE projects ADD COLUMN mediaError TEXT;");
+    }
+  }
+
+  // Future migrations: `if (from < 4) { ... }` etc.
 
   db.prepare(
     "INSERT INTO meta (key, value) VALUES ('schemaVersion', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -181,6 +222,8 @@ interface ProjectRow {
   source: string;
   width: number | null;
   height: number | null;
+  mediaStatus: string | null;
+  mediaError: string | null;
 }
 
 function rowToProject(row: ProjectRow): ProjectRecord {
@@ -195,6 +238,8 @@ function rowToProject(row: ProjectRow): ProjectRecord {
     source: JSON.parse(row.source) as ProjectRecord["source"],
     width: row.width,
     height: row.height,
+    mediaStatus: (row.mediaStatus ?? "ready") as ProjectRecord["mediaStatus"],
+    mediaError: row.mediaError,
   };
 }
 
@@ -214,11 +259,13 @@ class SqliteProjectRepository implements ProjectRepository {
       source: input.source,
       width: input.width,
       height: input.height,
+      mediaStatus: input.mediaStatus ?? "ready",
+      mediaError: null,
     };
     this.db
       .prepare(
-        `INSERT INTO projects (id, name, schemaVersion, version, timelineRevision, createdAt, updatedAt, source, width, height)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO projects (id, name, schemaVersion, version, timelineRevision, createdAt, updatedAt, source, width, height, mediaStatus, mediaError)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.id,
@@ -231,6 +278,8 @@ class SqliteProjectRepository implements ProjectRepository {
         JSON.stringify(record.source),
         record.width,
         record.height,
+        record.mediaStatus,
+        record.mediaError,
       );
     return record;
   }
@@ -261,12 +310,14 @@ class SqliteProjectRepository implements ProjectRepository {
       height: patch.height === undefined ? current.height : patch.height,
       timelineRevision:
         patch.timelineRevision === undefined ? current.timelineRevision : patch.timelineRevision,
+      mediaStatus: patch.mediaStatus ?? current.mediaStatus,
+      mediaError: patch.mediaError === undefined ? current.mediaError : patch.mediaError,
       version: current.version + 1,
       updatedAt: Date.now(),
     };
     this.db
       .prepare(
-        `UPDATE projects SET name=?, source=?, width=?, height=?, timelineRevision=?, version=?, updatedAt=? WHERE id=?`,
+        `UPDATE projects SET name=?, source=?, width=?, height=?, timelineRevision=?, mediaStatus=?, mediaError=?, version=?, updatedAt=? WHERE id=?`,
       )
       .run(
         next.name,
@@ -274,6 +325,8 @@ class SqliteProjectRepository implements ProjectRepository {
         next.width,
         next.height,
         next.timelineRevision,
+        next.mediaStatus,
+        next.mediaError,
         next.version,
         next.updatedAt,
         id,
@@ -780,6 +833,127 @@ class SqliteAiosRunRepository implements AiosRunRepository {
   }
 }
 
+interface UploadSessionRow {
+  id: string;
+  status: string;
+  filename: string;
+  declaredBytes: number;
+  declaredMime: string;
+  receivedBytes: number;
+  storageKey: string;
+  checksum: string | null;
+  projectId: string | null;
+  assetId: string | null;
+  errorCode: string | null;
+  createdAt: number;
+  updatedAt: number;
+  expiresAt: number;
+}
+
+function rowToUploadSession(row: UploadSessionRow): UploadSessionRecord {
+  return { ...row, status: row.status as UploadSessionRecord["status"] };
+}
+
+class SqliteUploadSessionRepository implements UploadSessionRepository {
+  constructor(private db: Db) {}
+
+  create(record: UploadSessionRecord): UploadSessionRecord {
+    this.db
+      .prepare(
+        `INSERT INTO upload_sessions
+           (id, status, filename, declaredBytes, declaredMime, receivedBytes, storageKey,
+            checksum, projectId, assetId, errorCode, createdAt, updatedAt, expiresAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.id,
+        record.status,
+        record.filename,
+        record.declaredBytes,
+        record.declaredMime,
+        record.receivedBytes,
+        record.storageKey,
+        record.checksum,
+        record.projectId,
+        record.assetId,
+        record.errorCode,
+        record.createdAt,
+        record.updatedAt,
+        record.expiresAt,
+      );
+    return record;
+  }
+
+  get(id: string): UploadSessionRecord | undefined {
+    const row = this.db.prepare("SELECT * FROM upload_sessions WHERE id = ?").get(id) as unknown as
+      | UploadSessionRow
+      | undefined;
+    return row ? rowToUploadSession(row) : undefined;
+  }
+
+  update(id: string, patch: Partial<Omit<UploadSessionRecord, "id">>): UploadSessionRecord {
+    const current = this.get(id);
+    if (!current) throw new UploadSessionNotFoundError(id);
+    const next: UploadSessionRecord = { ...current, ...patch, id, updatedAt: Date.now() };
+    this.db
+      .prepare(
+        `UPDATE upload_sessions SET status=?, filename=?, declaredBytes=?, declaredMime=?,
+           receivedBytes=?, storageKey=?, checksum=?, projectId=?, assetId=?, errorCode=?,
+           updatedAt=?, expiresAt=? WHERE id=?`,
+      )
+      .run(
+        next.status,
+        next.filename,
+        next.declaredBytes,
+        next.declaredMime,
+        next.receivedBytes,
+        next.storageKey,
+        next.checksum,
+        next.projectId,
+        next.assetId,
+        next.errorCode,
+        next.updatedAt,
+        next.expiresAt,
+        id,
+      );
+    return next;
+  }
+
+  claimFinalize(
+    id: string,
+    projectId: string,
+    assetId: string,
+    checksum: string,
+    now: number,
+  ): { claimed: boolean; record: UploadSessionRecord } {
+    const before = this.get(id);
+    if (!before) throw new UploadSessionNotFoundError(id);
+    // Conditional UPDATE is the claim: two finalizes racing on the same session
+    // cannot both see `changes === 1`, so only one of them creates a project.
+    const result = this.db
+      .prepare(
+        `UPDATE upload_sessions
+            SET status = 'finalized', projectId = ?, assetId = ?, checksum = ?, errorCode = NULL, updatedAt = ?
+          WHERE id = ? AND status <> 'finalized'`,
+      )
+      .run(projectId, assetId, checksum, now, id);
+    if (Number(result.changes) === 1) return { claimed: true, record: before };
+    // Lost the race (or this is a retry): hand back the winner's session.
+    return { claimed: false, record: this.get(id) ?? before };
+  }
+
+  listExpired(now: number): UploadSessionRecord[] {
+    const rows = this.db
+      .prepare("SELECT * FROM upload_sessions WHERE expiresAt <= ? AND status <> 'finalized'")
+      .all(now) as unknown as UploadSessionRow[];
+    return rows.map(rowToUploadSession);
+  }
+
+  delete(id: string): void {
+    this.db.prepare("DELETE FROM upload_sessions WHERE id = ?").run(id);
+  }
+}
+
 export function createSqliteRepositories(filename: string): Repositories & { close: () => void } {
   const db = openDatabase(filename);
   return {
@@ -791,6 +965,7 @@ export function createSqliteRepositories(filename: string): Repositories & { clo
     idempotency: new SqliteIdempotencyRepository(db),
     activity: new SqliteActivityRepository(db),
     aiosRuns: new SqliteAiosRunRepository(db),
+    uploads: new SqliteUploadSessionRepository(db),
     close: () => db.close(),
   };
 }

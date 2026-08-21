@@ -6,6 +6,9 @@ export default defineConfig({
       "packages/**/src/**/*.test.ts",
       "apps/**/server/**/*.test.ts",
       "apps/**/i18n/**/*.test.ts",
+      // The browser-side upload state machine is transport-injectable so it
+      // runs here, in node, against a fake transport.
+      "apps/**/app/lib/**/*.test.ts",
     ],
     environment: "node",
     passWithNoTests: false,

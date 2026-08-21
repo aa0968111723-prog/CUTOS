@@ -11,7 +11,6 @@ import { estimateImpact } from "@cutos/agent";
 import { compileTimelineToPreview, type PreviewManifest } from "@cutos/preview";
 import { probeMetadata, synthesizeSample } from "@cutos/media";
 import type { AnalysisSection } from "@cutos/media";
-import { config, isAllowedMime } from "./config.js";
 import { getRuntime } from "./runtime.js";
 import { buildProjectDTO, buildProjectSummaries } from "./dto.js";
 import { HttpError } from "./errors.js";
@@ -69,20 +68,100 @@ export async function importSample(): Promise<string> {
   return importFromTemp(temp, "Demo clip (12s)");
 }
 
-export async function importUpload(file: File): Promise<string> {
-  if (file.size > config.maxUploadBytes) {
-    throw new HttpError(413, "UPLOAD_TOO_LARGE", `File exceeds the ${Math.round(config.maxUploadBytes / 1024 / 1024)}MB limit.`);
+export interface AdoptUploadInput {
+  projectId: string;
+  assetId: string;
+  name: string;
+  /** Key the streamed bytes were sealed under. */
+  storageKey: string;
+  sizeBytes: number;
+  checksum: string;
+  mimeType: string;
+}
+
+/**
+ * Register already-stored bytes as a project's original media.
+ *
+ * Nothing here reads the file: duration and dimensions are unknown until the
+ * probe job runs, so the project starts at `mediaStatus: "uploaded"` with a
+ * zero-length source. That is what lets the finalize request answer in
+ * milliseconds instead of waiting on ffprobe — and what lets the home screen
+ * show the project as processing rather than blocking on it.
+ */
+export function adoptUploadedAsset(input: AdoptUploadInput): void {
+  const { store } = getRuntime();
+  // No copy and no move: the resumable upload was staged against this exact
+  // key and sealed into place. Rewriting a 500 MB file here would reintroduce
+  // the stall this whole path exists to remove.
+  const key = input.storageKey;
+
+  store.createProject({
+    id: input.projectId,
+    name: input.name,
+    source: {
+      id: input.projectId,
+      uri: `storage://${key}`,
+      durationMs: 0,
+      hasAudio: false,
+    },
+    width: null,
+    height: null,
+    mediaStatus: "uploaded",
+  });
+
+  store.addAsset({
+    id: input.assetId,
+    projectId: input.projectId,
+    kind: "original",
+    mimeType: input.mimeType,
+    storageKey: key,
+    checksum: input.checksum,
+    sizeBytes: input.sizeBytes,
+    durationMs: null,
+    width: null,
+    height: null,
+    codec: null,
+    createdAt: Date.now(),
+  });
+
+  logger.child({ projectId: input.projectId }).info("adopted uploaded media", {
+    name: input.name,
+    sizeBytes: input.sizeBytes,
+  });
+}
+
+/**
+ * Queue the media probe. Separate from the upload request by design: reading
+ * metadata is media work, and media work belongs in a durable job that can
+ * retry, report progress, and be re-run without another upload.
+ */
+export function enqueueProbe(projectId: string): string {
+  const { store, jobStore } = getRuntime();
+  const project = store.requireProject(projectId);
+  if (project.mediaStatus !== "probing") {
+    store.updateProject(projectId, { mediaStatus: "probing", mediaError: null });
   }
-  if (file.type && !isAllowedMime(file.type)) {
-    throw new HttpError(415, "MEDIA_UNSUPPORTED", `Unsupported media type: ${file.type}`);
-  }
-  const { storage } = getRuntime();
-  await storage.ensureTempDir();
-  const temp = storage.tempFile("upload");
-  const bytes = Buffer.from(await file.arrayBuffer());
-  const { writeFile } = await import("node:fs/promises");
-  await writeFile(temp, bytes);
-  return importFromTemp(temp, file.name || "Imported video");
+  const job = jobStore.enqueue({
+    kind: "probe",
+    projectId,
+    payload: { projectId },
+    maxAttempts: 2,
+  });
+  return job.id;
+}
+
+/**
+ * Re-run the probe for a project whose media is stored but unreadable.
+ *
+ * The uploaded asset is never discarded on a probe failure, so recovering from
+ * one costs a button press, not another upload over mobile data.
+ */
+export function retryProbe(projectId: string): { jobId: string } {
+  const { store } = getRuntime();
+  store.requireProject(projectId);
+  const asset = store.getAssetByKind(projectId, "original");
+  if (!asset) throw new HttpError(404, "MEDIA_MISSING", "No original media for this project.");
+  return { jobId: enqueueProbe(projectId) };
 }
 
 export function enqueueAnalyze(

@@ -24,8 +24,11 @@ import {
   type RunRecord,
   type RunRepository,
   type TimelineRepository,
+  type UploadSessionRecord,
+  type UploadSessionRepository,
   type VideoAnalysis,
 } from "./types.js";
+import { UploadSessionNotFoundError } from "./types.js";
 import { idempotencyRowId } from "./ids.js";
 
 const clone = <T>(v: T): T => structuredClone(v);
@@ -46,6 +49,8 @@ class MemoryProjectRepository implements ProjectRepository {
       source: input.source,
       width: input.width,
       height: input.height,
+      mediaStatus: input.mediaStatus ?? "ready",
+      mediaError: null,
     };
     this.rows.set(record.id, clone(record));
     return clone(record);
@@ -74,6 +79,8 @@ class MemoryProjectRepository implements ProjectRepository {
       height: patch.height === undefined ? current.height : patch.height,
       timelineRevision:
         patch.timelineRevision === undefined ? current.timelineRevision : patch.timelineRevision,
+      mediaStatus: patch.mediaStatus ?? current.mediaStatus,
+      mediaError: patch.mediaError === undefined ? current.mediaError : patch.mediaError,
       version: current.version + 1,
       updatedAt: Date.now(),
     };
@@ -341,6 +348,61 @@ class MemoryAiosRunRepository implements AiosRunRepository {
   }
 }
 
+class MemoryUploadSessionRepository implements UploadSessionRepository {
+  private rows = new Map<string, UploadSessionRecord>();
+
+  create(record: UploadSessionRecord): UploadSessionRecord {
+    this.rows.set(record.id, clone(record));
+    return clone(record);
+  }
+
+  get(id: string): UploadSessionRecord | undefined {
+    const row = this.rows.get(id);
+    return row ? clone(row) : undefined;
+  }
+
+  update(id: string, patch: Partial<Omit<UploadSessionRecord, "id">>): UploadSessionRecord {
+    const current = this.rows.get(id);
+    if (!current) throw new UploadSessionNotFoundError(id);
+    const next: UploadSessionRecord = { ...current, ...patch, id, updatedAt: Date.now() };
+    this.rows.set(id, clone(next));
+    return clone(next);
+  }
+
+  claimFinalize(
+    id: string,
+    projectId: string,
+    assetId: string,
+    checksum: string,
+    now: number,
+  ): { claimed: boolean; record: UploadSessionRecord } {
+    const current = this.rows.get(id);
+    if (!current) throw new UploadSessionNotFoundError(id);
+    const before = clone(current);
+    if (current.status === "finalized") return { claimed: false, record: before };
+    this.rows.set(id, clone({
+      ...current,
+      status: "finalized",
+      projectId,
+      assetId,
+      checksum,
+      errorCode: null,
+      updatedAt: now,
+    }));
+    return { claimed: true, record: before };
+  }
+
+  listExpired(now: number): UploadSessionRecord[] {
+    return [...this.rows.values()]
+      .filter((r) => r.expiresAt <= now && r.status !== "finalized")
+      .map(clone);
+  }
+
+  delete(id: string): void {
+    this.rows.delete(id);
+  }
+}
+
 export function createMemoryRepositories(): Repositories {
   return {
     projects: new MemoryProjectRepository(),
@@ -351,6 +413,7 @@ export function createMemoryRepositories(): Repositories {
     idempotency: new MemoryIdempotencyRepository(),
     activity: new MemoryActivityRepository(),
     aiosRuns: new MemoryAiosRunRepository(),
+    uploads: new MemoryUploadSessionRepository(),
   };
 }
 
