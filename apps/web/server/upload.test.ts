@@ -430,4 +430,57 @@ describe("streaming upload ingress", () => {
     // A perfectly ordinary name survives intact, including CJK.
     expect(uploads.sanitizeFilename("我的影片.mp4")).toBe("我的影片.mp4");
   });
+
+  it("repairs a project whose probe died without recording an outcome", async () => {
+    if (!ffmpegAvailable) return;
+    // The lockout this guards against: the probe worker writes mediaStatus
+    // "failed" from its own catch, but a job can reach a terminal state without
+    // that catch ever running — the process is killed mid-ffprobe and the
+    // store's stale-recovery fails the job on its behalf. The project then
+    // reads "probing" forever, and because the re-probe affordance is offered
+    // for "failed", nothing in the UI can move it forward.
+    const session = await uploadBytes(sampleBytes);
+    const { projectId } = await uploads.finalizeUpload(session.uploadId);
+    const { store, jobStore } = runtime.getRuntime();
+
+    // Simulate the dead process: every probe job terminal, project still probing.
+    for (const job of jobStore.list({ kind: "probe", projectId })) {
+      jobStore.cancel(job.id);
+      if (jobStore.get(job.id)?.status === "running") jobStore.fail(job.id, "process died");
+    }
+    store.updateProject(projectId, { mediaStatus: "probing", mediaError: null });
+    expect(editor.getProject(projectId).mediaStatus).toBe("probing");
+
+    // Nothing is queued or running, so this project would never change again.
+    const active = jobStore
+      .list({ kind: "probe", projectId })
+      .filter((j) => j.status === "queued" || j.status === "running");
+    expect(active).toHaveLength(0);
+
+    // Reconciliation (startup + interval in production) turns the permanent
+    // lockout into a retryable failure. `now` is pushed past the grace period.
+    const repaired = runtime.getRuntime().reconcileStuckProbes(Date.now() + 120_000);
+    expect(repaired).toBeGreaterThanOrEqual(1);
+    const reconciled = editor.getProject(projectId);
+    expect(reconciled.mediaStatus).toBe("failed");
+    expect(reconciled.mediaError).toBe("PROBE_FAILED");
+
+    // And it is genuinely recoverable from there, with the asset still present.
+    expect(store.getAssetByKind(projectId, "original")).toBeDefined();
+    expect(editor.retryProbe(projectId).jobId).toBeTruthy();
+    const settled = await waitForMediaStatus(projectId);
+    expect(settled.mediaStatus).toBe("ready");
+    expect(settled.source.durationMs).toBeGreaterThan(11_000);
+  }, 120_000);
+
+  it("leaves a probe that is genuinely still running alone", async () => {
+    if (!ffmpegAvailable) return;
+    const session = await uploadBytes(sampleBytes);
+    const { projectId } = await uploads.finalizeUpload(session.uploadId);
+    // Within the grace period, a brand-new project must never be marked failed
+    // just because its probe has not been claimed yet.
+    expect(runtime.getRuntime().reconcileStuckProbes(Date.now())).toBe(0);
+    const settled = await waitForMediaStatus(projectId);
+    expect(settled.mediaStatus).toBe("ready");
+  }, 120_000);
 });

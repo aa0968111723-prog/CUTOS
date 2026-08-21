@@ -4,6 +4,7 @@ import { useRef } from "react";
 import type { ChangeEvent } from "react";
 import type { Editor } from "../hooks/useEditor.js";
 import { formatSeconds } from "../lib/format.js";
+import { isMediaFailed, isMediaPending, isMediaReady } from "../lib/media-status.js";
 import { errorMessage, t } from "../i18n/index.js";
 import { UploadProgress } from "./UploadProgress.js";
 
@@ -69,7 +70,7 @@ export function ImportView({ editor }: { editor: Editor }) {
         <div style={{ marginTop: 20 }}>
           <h2>{t("home.recentProjects")}</h2>
           {editor.projects.map((p) => {
-            const processing = p.mediaStatus === "uploaded" || p.mediaStatus === "probing";
+            const processing = isMediaPending(p.mediaStatus);
             return (
               <div key={p.id} className="history-item">
                 <button className="linklike" onClick={() => void editor.openProject(p.id)}>
@@ -77,14 +78,19 @@ export function ImportView({ editor }: { editor: Editor }) {
                   {/* A project whose media is still being read is listed and
                       openable — it never blocks the rest of the home screen. */}
                   {processing && <span className="badge badge-soft">{t("media.processing")}</span>}
-                  {p.mediaStatus === "failed" && (
+                  {isMediaFailed(p.mediaStatus) && (
                     <span className="badge badge-warn">
                       {errorMessage(p.mediaError ?? "PROBE_FAILED")}
                     </span>
                   )}
-                  {p.mediaStatus === "ready" && <span className="muted"> · {formatSeconds(p.durationMs)}</span>}
+                  {isMediaReady(p.mediaStatus) && (
+                    <span className="muted"> · {formatSeconds(p.durationMs)}</span>
+                  )}
                 </button>
-                {p.mediaStatus === "failed" && (
+                {/* Offered for 處理中 as well as 失敗: a probe that died without
+                    recording an outcome looks like "processing" forever, and
+                    without this the row has no action that can unstick it. */}
+                {!isMediaReady(p.mediaStatus) && (
                   <button className="btn btn-ghost btn-sm" onClick={() => void editor.retryProbe(p.id)}>
                     {t("upload.retryProbe")}
                   </button>

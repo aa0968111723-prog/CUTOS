@@ -5,6 +5,7 @@ import type { PreviewManifest } from "@cutos/preview";
 import { useEditor, type Editor } from "../hooks/useEditor.js";
 import { usePreview } from "../preview/usePreview.js";
 import type { ProjectDTO } from "../lib/types.js";
+import { isMediaReady } from "../lib/media-status.js";
 import { t } from "../i18n/index.js";
 import { ImportView } from "./ImportView.js";
 import { ProjectSidebar } from "./ProjectSidebar.js";
@@ -18,7 +19,7 @@ import { InspectorPanel } from "./InspectorPanel.js";
 import { AiosPanel } from "./AiosPanel.js";
 import { ExportPanel } from "./ExportPanel.js";
 import { JobCenter } from "./JobCenter.js";
-import { MediaStatusPanel } from "./MediaStatusPanel.js";
+import { MediaStatusBanner } from "./MediaStatusBanner.js";
 
 export function Workspace() {
   const editor = useEditor();
@@ -37,10 +38,11 @@ export function Workspace() {
 
 function WorkspaceInner({ editor, project }: { editor: Editor; project: ProjectDTO }) {
   const [mode, setMode] = useState<"edited" | "original">("edited");
-  // A project exists before its media has been read. Rendering the player
-  // against a zero-length source would show a broken video rather than an
-  // honest "still processing", so the workspace waits for a real duration.
-  const mediaReady = project.mediaStatus === "ready";
+  // A project exists before its media has been read. That is worth SAYING, but
+  // never worth withholding the workspace for: this used to early-return a
+  // panel, which stranded anyone whose probe failed and anyone who opened a
+  // project mid-probe. The banner reports the same thing from inside.
+  const mediaReady = isMediaReady(project.mediaStatus);
   const sourceUrl = `/api/projects/${project.id}/source`;
 
   const originalManifest = useMemo<PreviewManifest>(
@@ -68,18 +70,11 @@ function WorkspaceInner({ editor, project }: { editor: Editor; project: ProjectD
   const effective = editor.previewOverride ?? (mode === "original" ? originalManifest : project.preview);
   const { videoRef, state, controls } = usePreview(effective, sourceUrl);
 
-  if (!mediaReady) {
-    return (
-      <MediaStatusPanel
-        project={project}
-        onRetryProbe={() => void editor.retryProbe(project.id)}
-        onBack={editor.closeProject}
-      />
-    );
-  }
-
   return (
     <>
+      {!mediaReady && (
+        <MediaStatusBanner project={project} onRetryProbe={() => void editor.retryProbe(project.id)} />
+      )}
       <StatsBar project={project} />
       <EditedPreviewPlayer
         videoRef={videoRef}

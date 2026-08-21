@@ -27,6 +27,7 @@ import {
   waitForMedia,
   type UploadState,
 } from "../lib/upload.js";
+import { shouldPollMedia } from "../lib/media-status.js";
 import type { ProjectDTO, ProjectSummaryDTO } from "../lib/types.js";
 import { errorMessage, t } from "../i18n/index.js";
 
@@ -165,6 +166,9 @@ export function useEditor(): Editor {
     async (projectId: string) => {
       const created = await getProject(projectId);
       setProject(created);
+      // The upload is over; clear its card so returning to the import view does
+      // not show a stale "已就緒" for a project the user is already inside.
+      setUpload(IDLE_UPLOAD_STATE);
       say("agent", t("import.imported", { name: created.name }));
       await refreshProjects();
       void runAnalysis(created.id);
@@ -337,6 +341,41 @@ export function useEditor(): Editor {
       cancelled = true;
     };
   }, [enterProject]);
+
+  /**
+   * Keep an open project fresh while its media is still being read.
+   *
+   * `openProject` fetches once. Without this, opening a project mid-probe
+   * showed a processing state that never changed — the probe would finish
+   * seconds later and the user would still be looking at "處理中", with no way
+   * into their own project short of navigating away and back.
+   */
+  useEffect(() => {
+    const id = project?.id;
+    if (!id || !shouldPollMedia(project?.mediaStatus)) return;
+    let cancelled = false;
+    // Bounded: if the server never resolves the probe, stop asking rather than
+    // polling forever. The banner's re-probe button stays as the way out.
+    const deadline = Date.now() + 3 * 60_000;
+    const timer = setInterval(async () => {
+      if (Date.now() > deadline) {
+        clearInterval(timer);
+        return;
+      }
+      try {
+        const fresh = await getProject(id);
+        if (cancelled) return;
+        // Only replace the project the user is actually looking at.
+        setProject((current) => (current?.id === id ? fresh : current));
+      } catch {
+        // A transient failure is not worth a message; the next tick retries.
+      }
+    }, 1_500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [project?.id, project?.mediaStatus]);
 
   const openProject = useCallback(
     async (id: string) => {
