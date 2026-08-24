@@ -43,6 +43,18 @@ export class WorkerRunner {
     return [...this.workers.keys()];
   }
 
+  /**
+   * Whether the poll loop is actually installed.
+   *
+   * A stopped runner is indistinguishable from an idle one by observation —
+   * both simply do nothing — so a health check has no way to tell them apart
+   * without asking. Backed by the timer rather than a separate flag, so it
+   * cannot drift out of sync with reality.
+   */
+  get isRunning(): boolean {
+    return this.pollTimer !== null;
+  }
+
   start(): void {
     if (this.pollTimer) return;
     // Recover anything a previous (crashed) worker left mid-flight.

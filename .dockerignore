@@ -1,0 +1,33 @@
+# Keep the build context small and, more importantly, free of host state that
+# would silently override what the image builds.
+node_modules
+**/node_modules
+.next
+**/.next
+out
+**/out
+dist
+**/dist
+coverage
+**/coverage
+*.tsbuildinfo
+
+# Runtime media and databases. Copying a developer's .data into the image would
+# ship their videos to production.
+.data
+**/.data
+
+# A stale stamp copied from the host would make /api/version lie, which is the
+# exact failure this repair exists to prevent. The build regenerates it.
+apps/web/.build-info.json
+
+.env
+.env.*
+!.env.example
+
+.git
+.github
+.cursor
+*.log
+.DS_Store
+Thumbs.db

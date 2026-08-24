@@ -347,9 +347,53 @@ function buildRuntime(): Runtime {
 
 const globalRef = globalThis as unknown as { __cutosRuntime?: Runtime };
 
+/**
+ * Validate the deployment, once, as soon as there is a runtime to validate.
+ *
+ * This is the boot-time check that turns a silently-misconfigured container
+ * into a loud one: an unwritable data directory or a missing ffprobe is logged
+ * with its reason and its remedy here, rather than discovered by whoever
+ * uploads next.
+ *
+ * Fired rather than awaited, for two reasons. `getRuntime` is synchronous and
+ * every route depends on it, so blocking would delay the first request behind a
+ * diagnostic; and preflight calls `getRuntime` itself, so it can only run once
+ * the global below is already assigned. Imported dynamically for the same
+ * reason — a static import would be a cycle.
+ */
+let preflightFired = false;
+
+function firePreflight(): void {
+  if (preflightFired) return;
+  preflightFired = true;
+  if (process.env.CUTOS_SKIP_PREFLIGHT === "1") return;
+  void import("./diagnostics.js")
+    .then(({ runStartupPreflight }) => runStartupPreflight())
+    .catch((error: unknown) => {
+      // Never allowed to take down the server it is reporting on.
+      logger.error("startup preflight crashed", {
+        error: error instanceof Error ? error.message : String(error),
+        hint: "GET /api/health for the full report.",
+      });
+    });
+}
+
 export function getRuntime(): Runtime {
   if (!globalRef.__cutosRuntime) {
-    globalRef.__cutosRuntime = buildRuntime();
+    try {
+      globalRef.__cutosRuntime = buildRuntime();
+    } finally {
+      // In a `finally`, not after the assignment — because the case that most
+      // needs logging is the one where `buildRuntime` THROWS. A data directory
+      // that cannot be created kills it at the first `mkdirSync`, and putting
+      // this on the success path meant the single most important failure was
+      // the only one that stayed silent.
+      //
+      // Re-entrant by construction: preflight calls `getRuntime` itself, and on
+      // a broken deployment that call throws again and lands back here. The
+      // `preflightFired` latch stops that from looping.
+      firePreflight();
+    }
   }
   return globalRef.__cutosRuntime;
 }

@@ -38,6 +38,7 @@ Export
 
 ## Documentation
 
+- [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) — production deployment checklist, health/version endpoints, and how to prove which build is live
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — core architecture and vertical slice
 - [`docs/ROADMAP.md`](docs/ROADMAP.md) — phased implementation roadmap
 - [`AGENTS.md`](AGENTS.md) — rules and guardrails for coding agents
@@ -89,6 +90,7 @@ pnpm test               # run unit + FFmpeg integration tests
 pnpm typecheck          # type-check every package
 pnpm lint               # lint the workspace
 pnpm build              # production build of the web app
+pnpm smoke <url>        # real end-to-end smoke test against a running deployment
 node scripts/benchmark.mjs 10 60   # media pipeline benchmark (add larger seconds to profile long media)
 ```
 
@@ -96,6 +98,26 @@ Persistence and storage default to a git-ignored `.data/` directory (`CUTOS_DATA
 `CUTOS_STORE=memory` for an ephemeral store. Analysis/export run as durable jobs; set
 `CUTOS_LLM_PROVIDER=openai` (+ `CUTOS_OPENAI_API_KEY`) to route planning through an OpenAI-compatible
 endpoint instead of the offline deterministic planner.
+
+### Operating a deployment
+
+Three endpoints exist so a running deployment can be asked what it is and whether
+it works, rather than inferred from a dashboard:
+
+| Endpoint | Answers |
+| --- | --- |
+| `GET /api/version` | Which commit, branch, build time and upload-protocol version is running. |
+| `GET /api/health` | Every subsystem — `app`, `dataDirWritable`, `database`, `storage`, `uploadSubsystem`, `jobWorker`, `ffprobe`, `ffmpeg` — with a reason and a remedy for anything unhealthy. |
+| `GET /api/ready` | 200 only when the deployment can genuinely accept video work; 503 otherwise. |
+
+The same report is available in the UI behind the **系統狀態** button in the header.
+The server also validates all of this at boot and logs each failure with its cause
+and its fix; it never exits, because a process that will not start cannot serve the
+endpoint you need to find out why.
+
+`pnpm smoke <url>` runs the whole thing for real against any deployment — it uploads
+an actual video in chunks, finalizes it, waits for the probe, and asks for a byte
+range the way a `<video>` element does. See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ### Media upload
 

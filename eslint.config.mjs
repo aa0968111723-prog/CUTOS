@@ -22,7 +22,12 @@ export default tseslint.config(
         performance: "readonly",
         Buffer: "readonly",
         setTimeout: "readonly",
+        clearTimeout: "readonly",
         URL: "readonly",
+        // Standard since Node 18, and what the smoke test uses to talk to a
+        // live deployment without pulling in an HTTP client dependency.
+        fetch: "readonly",
+        AbortController: "readonly",
       },
     },
   },

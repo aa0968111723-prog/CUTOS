@@ -849,3 +849,260 @@ button {
     min-height: 40px;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Deployment configuration banner
+
+   Shown before the user picks a file, never after. The error variant means the
+   server cannot store bytes at all; the warn variant means it can store them
+   but not read them, which is recoverable and must not look fatal.
+   --------------------------------------------------------------------------- */
+.deploy-banner {
+  margin: 14px 0;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+}
+
+.deploy-banner-error {
+  background: #fdecec;
+  border-color: #f5c2c2;
+}
+
+.deploy-banner-warn {
+  background: #fff7e8;
+  border-color: #f5dcae;
+}
+
+.deploy-banner-title {
+  margin: 0;
+  font-weight: 600;
+}
+
+.deploy-banner-error .deploy-banner-title {
+  color: var(--danger);
+}
+
+.deploy-banner-warn .deploy-banner-title {
+  color: var(--warn);
+}
+
+.deploy-banner-hint,
+.deploy-banner-names {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.deploy-banner-actions {
+  margin-top: 10px;
+}
+
+/* ---------------------------------------------------------------------------
+   System status entry point + panel
+   --------------------------------------------------------------------------- */
+.status-entry {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: 0 0 auto;
+}
+
+.status-entry-ok .status-dot,
+.status-row.status-ok .status-dot {
+  background: var(--success);
+}
+
+.status-entry-degraded .status-dot,
+.status-row.status-degraded .status-dot {
+  background: var(--warn);
+}
+
+.status-entry-down .status-dot,
+.status-row.status-down .status-dot {
+  background: var(--danger);
+}
+
+.status-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 24px 16px;
+  background: rgba(15, 23, 42, 0.45);
+  overflow-y: auto;
+}
+
+.status-panel {
+  width: 100%;
+  max-width: 560px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 20px;
+}
+
+.status-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.status-head h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.status-overall {
+  margin: 0 0 16px;
+  font-weight: 600;
+}
+
+.status-overall.status-ok {
+  color: var(--success);
+}
+
+.status-overall.status-degraded {
+  color: var(--warn);
+}
+
+.status-overall.status-down {
+  color: var(--danger);
+}
+
+.status-meta {
+  font-weight: 400;
+  font-size: 13px;
+}
+
+.status-section {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+.status-section h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.status-facts {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 6px 16px;
+  margin: 0;
+  font-size: 14px;
+}
+
+.status-facts dt {
+  color: var(--muted);
+}
+
+.status-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.status-facts .mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.status-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 0;
+}
+
+.status-row + .status-row {
+  border-top: 1px dashed var(--border);
+}
+
+.status-row .status-dot {
+  margin-top: 7px;
+}
+
+.status-row-body {
+  min-width: 0;
+  flex: 1;
+}
+
+.status-row-name {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-weight: 500;
+}
+
+.status-row-summary {
+  margin: 3px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.status-row-remedy {
+  margin: 6px 0 0;
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--warn);
+  overflow-wrap: anywhere;
+}
+
+.badge-ok {
+  background: #e7f7f0;
+  border-color: #b6e6d2;
+  color: var(--success);
+}
+
+.badge-degraded {
+  background: #fff7e8;
+  border-color: #f5dcae;
+  color: var(--warn);
+}
+
+.badge-down {
+  background: #fdecec;
+  border-color: #f5c2c2;
+  color: var(--danger);
+}
+
+@media (max-width: 480px) {
+  .status-panel {
+    padding: 16px;
+  }
+
+  .status-facts {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+
+  .status-facts dd {
+    margin-bottom: 8px;
+  }
+
+  /* The header wraps on a phone; without this the entry point is pushed off
+     the right edge on exactly the devices where it is most needed. */
+  .status-entry {
+    margin-left: 0;
+  }
+}

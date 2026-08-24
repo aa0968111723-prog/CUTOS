@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import type { PreviewManifest } from "@cutos/preview";
 import { useEditor, type Editor } from "../hooks/useEditor.js";
+import { useDeployment } from "../hooks/useDeployment.js";
 import { usePreview } from "../preview/usePreview.js";
 import type { ProjectDTO } from "../lib/types.js";
 import { isMediaReady } from "../lib/media-status.js";
@@ -20,18 +21,40 @@ import { AiosPanel } from "./AiosPanel.js";
 import { ExportPanel } from "./ExportPanel.js";
 import { JobCenter } from "./JobCenter.js";
 import { MediaStatusBanner } from "./MediaStatusBanner.js";
+import { SystemStatusPanel } from "./SystemStatusPanel.js";
 
 export function Workspace() {
   const editor = useEditor();
+  const deployment = useDeployment();
+  const [statusOpen, setStatusOpen] = useState(false);
+
   return (
     <div className="app">
       <header className="brand">
         <h1>{t("app.name")}</h1>
         <span className="tag">{t("app.tagline")}</span>
         {editor.project && <span className="badge">{editor.project.provider}</span>}
+        {/* Deliberately understated. A normal user never needs this; whoever is
+            debugging a deployment should not have to be told where it is. The
+            dot turns amber or red on its own when a subsystem is unhealthy, so
+            a broken production site announces itself without being opened. */}
+        <button
+          className={`btn btn-ghost btn-sm status-entry status-entry-${deployment.readiness?.status ?? "unknown"}`}
+          onClick={() => setStatusOpen(true)}
+          aria-label={t("status.open")}
+          title={t("status.open")}
+        >
+          <span className="status-dot" aria-hidden="true" />
+          {t("status.open")}
+        </button>
       </header>
-      {editor.project ? <WorkspaceInner editor={editor} project={editor.project} /> : <ImportView editor={editor} />}
+      {editor.project ? (
+        <WorkspaceInner editor={editor} project={editor.project} />
+      ) : (
+        <ImportView editor={editor} deployment={deployment} />
+      )}
       <JobCenter job={editor.job} />
+      {statusOpen && <SystemStatusPanel onClose={() => setStatusOpen(false)} />}
     </div>
   );
 }
