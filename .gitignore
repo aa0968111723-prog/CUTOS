@@ -23,3 +23,6 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 apps/web/next-env.d.ts
+
+# Build stamp written by scripts/write-build-info.mjs
+apps/web/.build-info.json

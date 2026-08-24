@@ -1,4 +1,11 @@
-import type { PreviewManifest, ProjectDTO, ProjectSummaryDTO } from "./types.js";
+import type {
+  HealthDTO,
+  PreviewManifest,
+  ProjectDTO,
+  ProjectSummaryDTO,
+  ReadinessDTO,
+  VersionDTO,
+} from "./types.js";
 
 export interface ApiErrorBody {
   code?: string;
@@ -229,4 +236,40 @@ export async function waitForJob(
     }
     await new Promise((resolve) => setTimeout(resolve, 400));
   }
+}
+
+// ---------------------------------------------------------------------------
+// Deployment diagnostics
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the deployment's readiness.
+ *
+ * `parse` is bypassed on purpose: readiness answers 503 when the deployment is
+ * broken, and that response carries exactly the diagnosis the UI needs to
+ * show. Treating it as an error would throw away the payload and leave the user
+ * with the generic "something went wrong" this repair exists to eliminate.
+ */
+export async function getReadiness(): Promise<ReadinessDTO> {
+  const res = await fetch("/api/ready", { cache: "no-store" });
+  const data = (await res.json().catch(() => null)) as ReadinessDTO | null;
+  if (!data || typeof data.ready !== "boolean") {
+    throw new ApiRequestError("INTERNAL", `Readiness check returned ${res.status}.`);
+  }
+  return data;
+}
+
+/** Full per-subsystem health report, for the 系統狀態 panel. */
+export async function getHealth(): Promise<HealthDTO> {
+  const res = await fetch("/api/health", { cache: "no-store" });
+  const data = (await res.json().catch(() => null)) as HealthDTO | null;
+  if (!data || !Array.isArray(data.checks)) {
+    throw new ApiRequestError("INTERNAL", `Health check returned ${res.status}.`);
+  }
+  return data;
+}
+
+/** Which build is serving this page. */
+export async function getVersion(): Promise<VersionDTO> {
+  return parse(await fetch("/api/version", { cache: "no-store" }));
 }

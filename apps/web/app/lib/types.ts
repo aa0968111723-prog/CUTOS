@@ -193,3 +193,64 @@ export interface UploadLimitsDTO {
   chunkBytes: number;
   allowedMimePrefixes: string[];
 }
+
+// ---------------------------------------------------------------------------
+// Deployment diagnostics
+// ---------------------------------------------------------------------------
+
+/** Mirror of the server's build-info payload. See `GET /api/version`. */
+export interface VersionDTO {
+  gitSha: string | null;
+  gitShaShort: string | null;
+  gitBranch: string | null;
+  buildTime: string | null;
+  appVersion: string;
+  /** 2 on any build with the streaming, resumable upload path. */
+  uploadProtocolVersion: number;
+  source: string;
+  environment: string;
+  nodeVersion: string;
+}
+
+export type CheckStatusDTO = "ok" | "degraded" | "down";
+
+export interface SubsystemCheckDTO {
+  name: string;
+  status: CheckStatusDTO;
+  summary: string;
+  reason?: string;
+  detail?: Record<string, unknown>;
+  remedy?: string;
+  durationMs: number;
+}
+
+/** Mirror of the server's health report. See `GET /api/health`. */
+export interface HealthDTO {
+  status: CheckStatusDTO;
+  checkedAt: string;
+  uptimeSeconds: number;
+  version: VersionDTO;
+  checks: SubsystemCheckDTO[];
+  failing: string[];
+  degraded: string[];
+}
+
+/**
+ * Mirror of the server's readiness report. See `GET /api/ready`.
+ *
+ * The two capability flags are what the UI actually branches on: a deployment
+ * that cannot store bytes must not offer an upload button, while one that
+ * merely cannot probe them should still let the user upload and reach their
+ * workspace.
+ */
+export interface ReadinessDTO {
+  ready: boolean;
+  canAcceptUploads: boolean;
+  canProcessMedia: boolean;
+  status: CheckStatusDTO;
+  blocking: string[];
+  degraded: string[];
+  checkedAt: string;
+  version: VersionDTO;
+  problems: SubsystemCheckDTO[];
+}

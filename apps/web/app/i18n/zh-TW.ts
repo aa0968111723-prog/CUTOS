@@ -42,6 +42,62 @@ export const zhTW = {
   "upload.assetKept": "影片檔案已經完整保留在伺服器，不需要重新上傳一次。",
   "upload.untitledFile": "未命名影片",
 
+  // 部署設定錯誤：在使用者選檔案之前就要講清楚，不是傳到一半才壞。
+  "deploy.configErrorTitle": "這個站台目前無法接收影片",
+  "deploy.configErrorHint":
+    "伺服器設定有問題，現在上傳的影片會存不住。這不是你的網路或檔案的問題，需要由管理者修正後才能使用。",
+  "deploy.degradedTitle": "影片處理功能目前不完整",
+  "deploy.degradedHint":
+    "影片可以正常上傳並保存，但伺服器暫時讀不到影片資訊。你仍然可以進入工作區，稍後再重新讀取。",
+  "deploy.affected": "有問題的項目：{names}",
+  "deploy.recheck": "重新檢查",
+  "deploy.openStatus": "查看系統狀態",
+
+  // 系統狀態面板：一般使用者用不到，管理者要能一眼看出哪裡壞掉。
+  "status.title": "系統狀態",
+  "status.open": "系統狀態",
+  "status.close": "關閉",
+  "status.refresh": "重新檢查",
+  "status.loading": "正在讀取系統狀態…",
+  "status.unreachable": "讀不到系統狀態，伺服器可能沒有回應。",
+  "status.overall.ok": "一切正常",
+  "status.overall.degraded": "部分功能不完整",
+  "status.overall.down": "有功能無法使用",
+  "status.checkedAt": "檢查時間：{time}",
+  "status.uptime": "已運行 {minutes} 分鐘",
+
+  "status.section.version": "CUTOS 版本",
+  "status.section.storage": "儲存空間",
+  "status.section.media": "影片處理器",
+  "status.section.aios": "AIOS",
+  "status.section.worker": "背景工作",
+
+  "status.version.app": "版本",
+  "status.version.commit": "程式碼版本",
+  "status.version.branch": "分支",
+  "status.version.buildTime": "建置時間",
+  "status.version.uploadProtocol": "上傳協定版本",
+  "status.version.unknown": "未知",
+  "status.version.stale":
+    "這個版本使用的是舊的上傳方式，正式站可能沒有部署到最新的 main。",
+
+  "status.aios.configured": "已設定",
+  "status.aios.notConfigured": "未設定（不影響影片上傳與剪輯）",
+
+  "status.check.ok": "正常",
+  "status.check.degraded": "不完整",
+  "status.check.down": "故障",
+  "status.remedy": "處理方式：{text}",
+
+  "status.name.app": "應用程式",
+  "status.name.dataDirWritable": "資料目錄",
+  "status.name.database": "資料庫",
+  "status.name.storage": "儲存空間",
+  "status.name.uploadSubsystem": "上傳子系統",
+  "status.name.jobWorker": "背景工作處理器",
+  "status.name.ffmpeg": "ffmpeg（影片轉檔）",
+  "status.name.ffprobe": "ffprobe（讀取影片資訊）",
+
   // 媒體處理狀態：上傳完成後、分析完成前，專案仍然看得到也打得開。
   "media.processing": "處理中",
   "media.processingHint": "影片已經上傳完成，正在讀取影片資訊。可以先回首頁做別的事，完成後這裡就會出現。",

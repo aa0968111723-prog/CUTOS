@@ -3,20 +3,27 @@
 import { useRef } from "react";
 import type { ChangeEvent } from "react";
 import type { Editor } from "../hooks/useEditor.js";
+import type { Deployment } from "../hooks/useDeployment.js";
 import { formatSeconds } from "../lib/format.js";
 import { isMediaFailed, isMediaPending, isMediaReady } from "../lib/media-status.js";
 import { errorMessage, t } from "../i18n/index.js";
 import { UploadProgress } from "./UploadProgress.js";
+import { DeploymentBanner } from "./DeploymentBanner.js";
 
 /** Phases during which the picker must stay locked. */
 const IN_FLIGHT = new Set(["preparing", "uploading", "uploaded", "probing"]);
 
-export function ImportView({ editor }: { editor: Editor }) {
+export function ImportView({ editor, deployment }: { editor: Editor; deployment: Deployment }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const uploading = IN_FLIGHT.has(editor.upload.phase);
   // The demo import is the only thing that still holds the shared `busy` flag;
   // an upload has its own state and must not be gated on it.
   const importing = editor.busy !== null;
+  // A deployment that cannot store bytes must not offer to take a file. This
+  // is the only condition allowed to disable the picker, and it requires the
+  // server to have said so explicitly — an unreachable readiness check leaves
+  // the button exactly as it was.
+  const misconfigured = deployment.blocksUpload;
 
   const onPick = (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -30,18 +37,20 @@ export function ImportView({ editor }: { editor: Editor }) {
     <section className="card">
       <h2>{t("home.importTitle")}</h2>
       <p className="muted">{t("home.importHint")}</p>
+
+      <DeploymentBanner deployment={deployment} />
       <div className="row">
         <button
           className="btn btn-primary"
           onClick={() => void editor.importSample()}
-          disabled={importing || uploading}
+          disabled={importing || uploading || misconfigured}
         >
           {importing ? <span className="spinner" /> : t("home.loadDemo")}
         </button>
         <button
           className="btn"
           onClick={() => fileRef.current?.click()}
-          disabled={importing || uploading}
+          disabled={importing || uploading || misconfigured}
         >
           {t("home.upload")}
         </button>

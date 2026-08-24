@@ -15,7 +15,8 @@
     "lint": "eslint .",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "smoke": "node scripts/production-smoke.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.13.0",
