@@ -28,12 +28,21 @@ import {
   type UploadState,
 } from "../lib/upload.js";
 import { shouldPollMedia } from "../lib/media-status.js";
-import type { ProjectDTO, ProjectSummaryDTO } from "../lib/types.js";
+import type { AgentTurnDTO, ProjectDTO, ProjectSummaryDTO, SuggestedActionDTO } from "../lib/types.js";
 import { errorMessage, t } from "../i18n/index.js";
 
 export interface ChatMessage {
   role: "user" | "agent" | "error";
   text: string;
+  turn?: AgentTurnDTO;
+}
+
+export interface SendInstructionOptions {
+  playheadMs?: number;
+  previewMode?: "edited" | "original";
+  timelineRevision?: number;
+  selectedRange?: { startMs: number; endMs: number };
+  action?: SuggestedActionDTO;
 }
 
 export interface Editor {
@@ -55,7 +64,7 @@ export interface Editor {
   resetUpload: () => void;
   /** Re-read media metadata without asking for the file again. */
   retryProbe: (projectId: string) => Promise<void>;
-  sendInstruction: (text: string) => Promise<void>;
+  sendInstruction: (text: string, options?: SendInstructionOptions) => Promise<void>;
   applyPlan: () => Promise<void>;
   discardPlan: () => Promise<void>;
   rejectOp: (index: number) => Promise<void>;
@@ -400,19 +409,38 @@ export function useEditor(): Editor {
   }, []);
 
   const sendInstruction = useCallback(
-    async (text: string) => {
+    async (text: string, options?: SendInstructionOptions) => {
       if (!project || !text.trim()) return;
       say("user", text);
-      setBusy(t("agent.planning"));
+      setBusy(t("agent.thinking"));
       setPreviewOverride(null);
       try {
-        const { dto, status } = await requestPlan(project.id, text);
+        const { dto, status, turn } = await requestPlan(project.id, text, {
+          playheadMs: options?.playheadMs,
+          previewMode: options?.previewMode,
+          timelineRevision: options?.timelineRevision ?? project.timelineRevision,
+          selectedRange: options?.selectedRange,
+          action: options?.action,
+        });
         setProject(dto);
-        if (dto.pendingPlan) {
+        if (turn?.type === "answer" || turn?.type === "question") {
+          setMessages((prev) => [...prev, { role: "agent", text: turn.message, turn }]);
+        } else if (dto.pendingPlan) {
           say("agent", t("agent.reviewBelow", { summary: dto.pendingPlan.summary }));
         } else if (status === "failed") {
           const run = dto.agentRuns[0];
-          say("agent", run?.error ? t("agent.cannotDo", { reason: run.error }) : t("agent.noEdits"));
+          const reason = run?.error ?? "";
+          const looksLikeZod = /Array must contain at least 1 element/.test(reason);
+          say(
+            "agent",
+            looksLikeZod
+              ? t("agent.noEdits")
+              : run?.error
+                ? t("agent.cannotDo", { reason: run.error })
+                : t("agent.noEdits"),
+          );
+        } else if (turn?.type === "edit_plan") {
+          say("agent", t("agent.reviewBelow", { summary: turn.message }));
         }
       } catch (error) {
         fail(error);

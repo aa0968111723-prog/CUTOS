@@ -10,7 +10,10 @@ import { ffmpeg } from "./ffmpeg.js";
  *
  * Idempotent: if the file already exists it is left untouched.
  */
-export async function synthesizeSample(outputPath: string): Promise<string> {
+export async function synthesizeSample(
+  outputPath: string,
+  options: { durationSec?: number } = {},
+): Promise<string> {
   try {
     await access(outputPath);
     return outputPath;
@@ -20,6 +23,8 @@ export async function synthesizeSample(outputPath: string): Promise<string> {
 
   await mkdir(dirname(outputPath), { recursive: true });
 
+  const durationSec = options.durationSec ?? 12;
+
   // Commas inside the expression are escaped so FFmpeg does not treat them as
   // filterchain separators.
   const audioExpr = "0.35*sin(2*PI*440*t)*lt(mod(t\\,3)\\,1.5)";
@@ -28,11 +33,11 @@ export async function synthesizeSample(outputPath: string): Promise<string> {
     "-f",
     "lavfi",
     "-i",
-    "testsrc2=size=640x360:rate=30:duration=12",
+    `testsrc2=size=640x360:rate=30:duration=${durationSec}`,
     "-f",
     "lavfi",
     "-i",
-    `aevalsrc=exprs=${audioExpr}:s=44100:d=12`,
+    `aevalsrc=exprs=${audioExpr}:s=44100:d=${durationSec}`,
     "-c:v",
     "libx264",
     "-preset",
@@ -44,7 +49,7 @@ export async function synthesizeSample(outputPath: string): Promise<string> {
     "-b:a",
     "128k",
     "-t",
-    "12",
+    String(durationSec),
     "-movflags",
     "+faststart",
     "-y",

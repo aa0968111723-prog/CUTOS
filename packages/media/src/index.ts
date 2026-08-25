@@ -9,3 +9,4 @@ export * from "./analysis.js";
 export * from "./waveform.js";
 export * from "./transcription.js";
 export * from "./analysis-runner.js";
+export * from "./frame.js";

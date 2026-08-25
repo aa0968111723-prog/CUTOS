@@ -5,6 +5,15 @@ export function formatMs(ms: number): string {
   return `${minutes}:${seconds.toFixed(1).padStart(4, "0")}`;
 }
 
+/** `00:25.0` — used by the playhead chip and grounded time ranges. */
+export function formatClock(ms: number): string {
+  const clamped = Math.max(0, Math.round(ms));
+  const minutes = Math.floor(clamped / 60_000);
+  const seconds = Math.floor((clamped % 60_000) / 1000);
+  const tenths = Math.floor((clamped % 1000) / 100);
+  return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}.${tenths}`;
+}
+
 export function formatSeconds(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }

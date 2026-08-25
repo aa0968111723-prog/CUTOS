@@ -7,7 +7,7 @@ import {
   timelineDurationMs,
   UnsupportedOperationError,
 } from "@cutos/timeline";
-import { estimateImpact } from "@cutos/agent";
+import { estimateImpact, type PlaybackContextInput, type SuggestedAction } from "@cutos/agent";
 import { compileTimelineToPreview, type PreviewManifest } from "@cutos/preview";
 import { probeMetadata, synthesizeSample } from "@cutos/media";
 import type { AnalysisSection } from "@cutos/media";
@@ -66,6 +66,14 @@ export async function importSample(): Promise<string> {
   const temp = storage.tempFile("mp4");
   await synthesizeSample(temp);
   return importFromTemp(temp, "Demo clip (12s)");
+}
+
+/** Deterministic generated clip of a chosen duration (vision / inspect E2E). */
+export async function importGeneratedClip(options: { durationSec: number; name: string }): Promise<string> {
+  const { storage } = getRuntime();
+  const temp = storage.tempFile("mp4");
+  await synthesizeSample(temp, { durationSec: options.durationSec });
+  return importFromTemp(temp, options.name);
 }
 
 export interface AdoptUploadInput {
@@ -189,11 +197,40 @@ export function enqueueExport(projectId: string): string {
   return job.id;
 }
 
-export async function plan(projectId: string, instruction: string) {
+export async function plan(
+  projectId: string,
+  instruction: string,
+  playback?: PlaybackContextInput,
+  action?: SuggestedAction,
+) {
   const { store, agentRuntime } = getRuntime();
   store.requireProject(projectId);
-  const run = await agentRuntime.planEdit({ projectId, instruction });
-  return { runId: run.id, status: run.status, dto: buildProjectDTO(projectId) };
+  const run = await agentRuntime.converse({ projectId, instruction, playback, action });
+  return {
+    runId: run.id,
+    status: run.status,
+    dto: buildProjectDTO(projectId),
+    turn: run.turn ?? null,
+  };
+}
+
+/** Project-scoped still. Never accepts a filesystem path. */
+export async function extractFrame(projectId: string, timeMs: number) {
+  const { store, frames } = getRuntime();
+  store.requireProject(projectId);
+  return frames.extractFrame(projectId, timeMs);
+}
+
+export async function extractFrameWindow(input: {
+  projectId: string;
+  centerMs: number;
+  beforeMs: number;
+  afterMs: number;
+  samples: number;
+}) {
+  const { store, frames } = getRuntime();
+  store.requireProject(input.projectId);
+  return frames.extractFrameWindow(input);
 }
 
 function loadHistory(projectId: string): TimelineHistory {
