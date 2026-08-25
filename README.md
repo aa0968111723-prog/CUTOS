@@ -138,6 +138,24 @@ The web app runs fully offline by default via the deterministic local planner. T
 planning through an OpenAI-compatible endpoint instead, set `CUTOS_LLM_PROVIDER=openai`,
 `CUTOS_OPENAI_API_KEY`, and optionally `CUTOS_OPENAI_BASE_URL` / `CUTOS_OPENAI_MODEL`.
 
+### Zeabur AI Hub (video vision)
+
+CUTOS can **look at frames**, answer questions about a time point, then turn that
+grounding into an Edit Plan. This is not a base-URL swap: questions never go through
+the Edit Planner, and the API key stays on the server.
+
+```bash
+CUTOS_AI_PROVIDER=zeabur
+CUTOS_ZEABUR_AI_API_KEY=...          # server-side only
+CUTOS_ZEABUR_AI_BASE_URL=https://hnd1.aihub.zeabur.ai/v1   # optional override
+CUTOS_ZEABUR_FAST_MODEL=gpt-4o-mini
+CUTOS_ZEABUR_VISION_MODEL=gpt-4o-mini
+CUTOS_ZEABUR_REASONING_MODEL=gpt-4o
+```
+
+`CUTOS_AI_PROVIDER` takes precedence over `CUTOS_LLM_PROVIDER`. OpenAI, AIOS and the
+local planner keep working. See [`docs/VIDEO_VISION.md`](docs/VIDEO_VISION.md).
+
 ### AI‑OS (AIOS) integration
 
 CUTOS integrates bidirectionally with [AIOS](https://github.com/agiresearch/AIOS): use an AIOS

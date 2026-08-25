@@ -21,7 +21,15 @@ const FEATURE_KEYS: Record<string, MessageKey> = {
 };
 
 function providerLabel(provider: IntegrationDTO["provider"]): string {
-  const key = `aios.provider${provider === "aios" ? "Aios" : provider === "openai" ? "Openai" : "Local"}` as MessageKey;
+  const suffix =
+    provider === "aios"
+      ? "Aios"
+      : provider === "openai"
+        ? "Openai"
+        : provider === "zeabur"
+          ? "Zeabur"
+          : "Local";
+  const key = `aios.provider${suffix}` as MessageKey;
   return t(key);
 }
 

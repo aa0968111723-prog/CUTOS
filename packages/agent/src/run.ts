@@ -1,4 +1,6 @@
 import type { ToolCallRecord } from "./tools.js";
+import type { AgentTurn, VisualObservation } from "./chat-response.js";
+import type { UserIntentKind } from "./intent.js";
 
 export type AgentRunStatus =
   | "running"
@@ -10,13 +12,16 @@ export type AgentRunStatus =
 
 export type AgentStepKind =
   | "observe"
+  | "intent"
   | "context"
+  | "inspect"
   | "tool_call"
   | "plan"
   | "validate"
   | "approval"
   | "execute"
   | "verify"
+  | "answer"
   | "summary"
   | "error";
 
@@ -48,6 +53,11 @@ export interface AgentRun {
   planId: string | null;
   summary: string | null;
   error: string | null;
+  /** Conversation turn (answer / edit_plan / question). Absent on legacy runs. */
+  turn?: AgentTurn;
+  /** Last visual observation produced by this run, used as conversation grounding. */
+  grounding?: VisualObservation;
+  intents?: UserIntentKind[];
 }
 
 export interface AgentRunStore {

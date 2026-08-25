@@ -112,7 +112,12 @@ function WorkspaceInner({ editor, project }: { editor: Editor; project: ProjectD
 
       <div className="ws-grid">
         <section className="ws-agent">
-          <AgentPanel editor={editor} />
+          <AgentPanel
+            editor={editor}
+            playheadMs={state.currentMs}
+            previewMode={mode}
+            onSeek={controls.seek}
+          />
           <EditReviewPanel editor={editor} project={project} />
           <AgentActivity project={project} />
         </section>

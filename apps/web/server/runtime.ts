@@ -5,14 +5,29 @@ import {
   AgentRuntime,
   ToolRegistry,
   createPlanner,
+  createVisionProvider,
   PlanGateway,
   EditContextSchema,
+  MemoryVisualIndexStore,
   type AgentRun,
   type AgentRunStore,
   type ContextBuilder,
   type EditContext,
+  type ExtractedFrame,
+  type FrameExtractor,
   type Tool,
 } from "@cutos/agent";
+import {
+  DEFAULT_FRAME_WIDTH,
+  assertProjectAsset,
+  extractJpegFrame,
+  exportTimeline,
+  frameObjectKey,
+  probeMetadata,
+  runAnalysis,
+  sampleWindowTimes,
+  type AnalysisSection,
+} from "@cutos/media";
 import {
   MemoryJobStore,
   SqliteJobStore,
@@ -26,12 +41,6 @@ import {
   createSqliteProjectStore,
   type ProjectStore,
 } from "@cutos/project-store";
-import {
-  exportTimeline,
-  probeMetadata,
-  runAnalysis,
-  type AnalysisSection,
-} from "@cutos/media";
 import { createTimeline } from "@cutos/timeline";
 import { config } from "./config.js";
 import { logger } from "./logger.js";
@@ -43,6 +52,7 @@ export interface Runtime {
   runner: WorkerRunner;
   agentRuntime: AgentRuntime;
   agentRunStore: AgentRunStore;
+  frames: FrameExtractor;
   /**
    * Repair projects left mid-probe by a process that died. Exposed so a test
    * can drive it deterministically instead of waiting on the interval.
@@ -100,19 +110,30 @@ function buildRuntime(): Runtime {
 
   // --- agent tools ---
   const registry = new ToolRegistry();
-  const createEditPlanTool: Tool<{ instruction: string; context: EditContext }, unknown> = {
+  const createEditPlanTool: Tool<
+    { instruction: string; context: EditContext; operations?: unknown[]; summary?: string },
+    unknown
+  > = {
     name: "create_edit_plan",
     description: "Turn a natural-language instruction into a validated Edit Plan and stage it for review.",
     permission: "plan",
-    argsSchema: z.object({ instruction: z.string().min(1), context: EditContextSchema }),
+    argsSchema: z.object({
+      instruction: z.string().min(1),
+      context: EditContextSchema,
+      operations: z.array(z.unknown()).optional(),
+      summary: z.string().optional(),
+    }),
     async execute(args, ctx) {
       const gateway = new PlanGateway(createPlanner());
-      const result = await gateway.plan({
+      const request = {
         instruction: args.instruction,
         sourceDurationMs: args.context.sourceDurationMs,
         silences: args.context.silences,
         targetRevision: args.context.timelineRevision,
-      });
+      };
+      const result = args.operations
+        ? gateway.wrap({ summary: args.summary ?? "Proposed edits", operations: args.operations }, request)
+        : await gateway.plan(request);
       if (!result.ok) return { issues: result.errors };
       store.savePendingPlan(ctx.projectId, result.value);
       return { plan: result.value };
@@ -125,6 +146,7 @@ function buildRuntime(): Runtime {
       const project = store.requireProject(projectId);
       const analysis = store.loadAnalysis(projectId);
       const timeline = store.loadTimeline(projectId);
+      const asset = store.getAssetByKind(projectId, "original");
       return {
         sourceDurationMs: project.source.durationMs,
         timelineRevision: timeline?.revision ?? project.timelineRevision,
@@ -133,12 +155,91 @@ function buildRuntime(): Runtime {
           startMs: s.startMs,
           endMs: s.endMs,
           text: s.text,
+          speaker: s.speaker,
         })),
+        scenes: analysis?.scenes,
+        mediaChecksum: asset?.checksum ?? analysis?.mediaChecksum,
       };
     },
   };
 
-  const agentRuntime = new AgentRuntime({ registry, contextBuilder, runStore: agentRunStore });
+  async function extractProjectFrame(projectId: string, timeMs: number): Promise<ExtractedFrame> {
+    const project = store.requireProject(projectId);
+    const asset = store.getAssetByKind(projectId, "original");
+    if (!asset) throw new Error("No original media asset for project");
+    assertProjectAsset(asset, projectId);
+    const clamped = Math.max(0, Math.min(project.source.durationMs, Math.round(timeMs)));
+    const cacheKey = frameObjectKey({
+      projectId,
+      mediaChecksum: asset.checksum,
+      timeMs: clamped,
+      width: DEFAULT_FRAME_WIDTH,
+    });
+    if (await storage.exists(cacheKey)) {
+      const jpeg = await storage.get(cacheKey);
+      return { timeMs: clamped, mimeType: "image/jpeg", width: DEFAULT_FRAME_WIDTH, height: 0, data: jpeg };
+    }
+    const extracted = await storage.withLocalFile(asset.storageKey, (filePath) =>
+      extractJpegFrame(filePath, clamped, { width: DEFAULT_FRAME_WIDTH }),
+    );
+    await storage.put(cacheKey, extracted.jpeg);
+    return {
+      timeMs: extracted.timeMs,
+      mimeType: "image/jpeg",
+      width: extracted.width,
+      height: 0,
+      data: extracted.jpeg,
+    };
+  }
+
+  async function extractProjectFrameWindow(input: {
+    projectId: string;
+    centerMs: number;
+    beforeMs: number;
+    afterMs: number;
+    samples: number;
+  }): Promise<ExtractedFrame[]> {
+    const project = store.requireProject(input.projectId);
+    const times = sampleWindowTimes({
+      centerMs: input.centerMs,
+      beforeMs: input.beforeMs,
+      afterMs: input.afterMs,
+      samples: input.samples,
+      durationMs: project.source.durationMs,
+    });
+    const frames: ExtractedFrame[] = [];
+    for (const timeMs of times) {
+      frames.push(await extractProjectFrame(input.projectId, timeMs));
+    }
+    return frames;
+  }
+
+  const frames: FrameExtractor = {
+    extractFrame: (projectId, timeMs) => extractProjectFrame(projectId, timeMs),
+    extractFrameWindow: (input) => extractProjectFrameWindow(input),
+  };
+
+  const agentRuntime = new AgentRuntime({
+    registry,
+    contextBuilder,
+    runStore: agentRunStore,
+    conversation: {
+      vision: createVisionProvider(process.env, (usage) => {
+        logger.info("model call", {
+          provider: usage.provider,
+          model: usage.model,
+          task: usage.task,
+          latencyMs: usage.latencyMs,
+          promptTokens: usage.promptTokens,
+          completionTokens: usage.completionTokens,
+          totalTokens: usage.totalTokens,
+          cost: usage.cost,
+        });
+      }),
+      frames,
+      visualIndex: new MemoryVisualIndexStore(),
+    },
+  });
 
   // --- workers ---
   const analyzeWorker: Worker<AnalyzePayload, { sections: AnalysisSection[] }> = {
@@ -342,7 +443,7 @@ function buildRuntime(): Runtime {
   reconcileTimer.unref?.();
   logger.info("runtime initialized", { storeMode: config.storeMode });
 
-  return { store, jobStore, storage, runner, agentRuntime, agentRunStore, reconcileStuckProbes };
+  return { store, jobStore, storage, runner, agentRuntime, agentRunStore, frames, reconcileStuckProbes };
 }
 
 const globalRef = globalThis as unknown as { __cutosRuntime?: Runtime };

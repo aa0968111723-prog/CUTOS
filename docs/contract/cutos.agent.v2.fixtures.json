@@ -2050,7 +2050,15 @@
               "model": "gpt-4o-mini",
               "backend": "openai",
               "agentName": "cutos"
-            }
+            },
+            "zeabur": {
+              "configured": false,
+              "baseUrl": "https://hnd1.aihub.zeabur.ai/v1",
+              "visionModel": "gpt-4o-mini",
+              "reasoningModel": "gpt-4o",
+              "fastModel": "gpt-4o-mini"
+            },
+            "visionConfigured": false
           },
           "protocol": "cutos.agent.v2",
           "version": 2
@@ -2138,6 +2146,11 @@
                 "configured": false,
                 "model": "gpt-4o-mini",
                 "backend": "openai"
+              },
+              "zeabur": {
+                "configured": false,
+                "visionConfigured": false,
+                "visionModel": "gpt-4o-mini"
               }
             },
             "timelineRevision": 0,
@@ -2566,8 +2579,8 @@
               "requestId": "http-req-6",
               "generatedAt": "2026-01-01T00:00:00.000Z",
               "analysisVersion": 1,
-              "mediaChecksum": "01bd56e7ab4d0e31427651aa536115a25e1a74034a0017586fe12af326f082fa",
-              "contextHash": "9579a2aec3e2b5c9d403a4f6e04ec76d5c92f4c368d1298dabae6298b1b37262"
+              "mediaChecksum": "cc6652ed97f9a8631e128cdb501225d226c10489bc8a0dc74df29134cd82e310",
+              "contextHash": "b7dc286c78cc0676fa4f41936e7d4a3d12d99be1d327bc40c9fab68a94af5150"
             },
             "budget": {
               "maxRanges": 3,
@@ -3123,6 +3136,11 @@
                 "configured": false,
                 "model": "gpt-4o-mini",
                 "backend": "openai"
+              },
+              "zeabur": {
+                "configured": false,
+                "visionConfigured": false,
+                "visionModel": "gpt-4o-mini"
               }
             },
             "timelineRevision": 1,
@@ -3229,6 +3247,16 @@
                   },
                   {
                     "at": 1767225600000,
+                    "kind": "intent",
+                    "title": "Classified intent",
+                    "detail": "edit",
+                    "data": {
+                      "intent": "edit",
+                      "edit": 1
+                    }
+                  },
+                  {
+                    "at": 1767225600000,
                     "kind": "tool_call",
                     "title": "Called tool \"create_edit_plan\"",
                     "detail": "ok"
@@ -3278,7 +3306,13 @@
                     "title": "Done",
                     "detail": "刪除 4 個停頓（共約 6.0 秒，長度超過 1.0 秒）。"
                   }
-                ]
+                ],
+                "turn": {
+                  "type": "edit_plan",
+                  "message": "刪除 4 個停頓（共約 6.0 秒，長度超過 1.0 秒）。",
+                  "planId": "plan_000000000004"
+                },
+                "grounding": null
               }
             ],
             "hasExport": false,
@@ -3342,7 +3376,7 @@
           },
           "activity": [
             {
-              "id": "00000000-0000-4000-8000-000000000004",
+              "id": "00000000-0000-4000-8000-000000000005",
               "timestamp": "2026-01-01T00:00:00.000Z",
               "aiosRunId": "aios-run-http",
               "aiosStepId": "step-12",
@@ -3355,7 +3389,7 @@
               }
             },
             {
-              "id": "00000000-0000-4000-8000-000000000005",
+              "id": "00000000-0000-4000-8000-000000000006",
               "timestamp": "2026-01-01T00:00:00.000Z",
               "aiosRunId": "aios-run-http",
               "aiosStepId": "step-12",
@@ -3370,7 +3404,7 @@
             }
           ],
           "approvalRequest": {
-            "id": "00000000-0000-4000-8000-000000000006",
+            "id": "00000000-0000-4000-8000-000000000007",
             "projectId": "00000000-0000-4000-8000-000000000001",
             "capability": "apply_edit_plan",
             "reasonCode": "removes_more_than_30_percent",
@@ -3450,6 +3484,11 @@
                 "configured": false,
                 "model": "gpt-4o-mini",
                 "backend": "openai"
+              },
+              "zeabur": {
+                "configured": false,
+                "visionConfigured": false,
+                "visionModel": "gpt-4o-mini"
               }
             },
             "timelineRevision": 1,
@@ -3556,6 +3595,16 @@
                   },
                   {
                     "at": 1767225600000,
+                    "kind": "intent",
+                    "title": "Classified intent",
+                    "detail": "edit",
+                    "data": {
+                      "intent": "edit",
+                      "edit": 1
+                    }
+                  },
+                  {
+                    "at": 1767225600000,
                     "kind": "tool_call",
                     "title": "Called tool \"create_edit_plan\"",
                     "detail": "ok"
@@ -3605,7 +3654,13 @@
                     "title": "Done",
                     "detail": "刪除 4 個停頓（共約 6.0 秒，長度超過 1.0 秒）。"
                   }
-                ]
+                ],
+                "turn": {
+                  "type": "edit_plan",
+                  "message": "刪除 4 個停頓（共約 6.0 秒，長度超過 1.0 秒）。",
+                  "planId": "plan_000000000004"
+                },
+                "grounding": null
               }
             ],
             "hasExport": false,

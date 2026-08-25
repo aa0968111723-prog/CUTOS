@@ -4,7 +4,7 @@ import {
   type Result,
   EDIT_DSL_VERSION,
 } from "@cutos/edit-dsl";
-import type { Planner, PlanRequest } from "./types.js";
+import type { Planner, PlanRequest, ProposedEdits } from "./types.js";
 
 export interface GatewayOptions {
   /** Clock injection for deterministic tests. */
@@ -36,8 +36,12 @@ export class PlanGateway {
     return this.planner.name;
   }
 
-  async plan(request: PlanRequest): Promise<Result<EditPlan, string[]>> {
-    const proposed = await this.planner.propose(request);
+  /**
+   * Wrap already-proposed operations (e.g. a grounded trim) in a versioned
+   * Edit Plan and validate. Used when conversation grounding, not the LLM,
+   * produced the operations — the model still never touches the timeline.
+   */
+  wrap(proposed: ProposedEdits, request: PlanRequest): Result<EditPlan, string[]> {
     const envelope = {
       version: EDIT_DSL_VERSION,
       id: this.createId(),
@@ -50,5 +54,10 @@ export class PlanGateway {
       operations: proposed.operations,
     };
     return validateEditPlan(envelope, { sourceDurationMs: request.sourceDurationMs });
+  }
+
+  async plan(request: PlanRequest): Promise<Result<EditPlan, string[]>> {
+    const proposed = await this.planner.propose(request);
+    return this.wrap(proposed, request);
   }
 }

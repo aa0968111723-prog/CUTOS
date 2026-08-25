@@ -6,7 +6,12 @@ import {
 } from "@cutos/edit-dsl";
 import { clipOutputDurationMs, timelineDurationMs } from "@cutos/timeline";
 import { compileTimelineToPreview } from "@cutos/preview";
-import { DefaultApprovalPolicy, describeProvider, estimateImpact, type AgentRun } from "@cutos/agent";
+import {
+  DefaultApprovalPolicy,
+  describeProvider,
+  estimateImpact,
+  type AgentRun,
+} from "@cutos/agent";
 import type {
   AgentRunDTO,
   ImpactDTO,
@@ -90,6 +95,8 @@ function toAgentRunDTO(run: AgentRun): AgentRunDTO {
     summary: run.summary,
     error: run.error,
     steps: run.steps.map((s) => ({ at: s.at, kind: s.kind, title: s.title, detail: s.detail, data: s.data })),
+    turn: run.turn ?? null,
+    grounding: run.grounding ?? null,
   };
 }
 
@@ -131,6 +138,11 @@ export function buildProjectDTO(id: string): ProjectDTO {
         kernelUrl: providerInfo.aios.kernelUrl,
         model: providerInfo.aios.model,
         backend: providerInfo.aios.backend,
+      },
+      zeabur: {
+        configured: providerInfo.zeabur.configured,
+        visionConfigured: providerInfo.visionConfigured,
+        visionModel: providerInfo.zeabur.visionModel,
       },
     },
     timelineRevision: currentRevision,

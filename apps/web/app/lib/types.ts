@@ -78,6 +78,50 @@ export interface AgentStepDTO {
   data?: Record<string, string | number>;
 }
 
+export interface VisualObservationDTO {
+  startMs: number;
+  endMs: number;
+  description: string;
+  objects: string[];
+  peopleDescriptions: string[];
+  textSeen: string[];
+  confidence: number;
+  frameRefs: number[];
+}
+
+export interface SuggestedActionDTO {
+  type:
+    | "trim_from"
+    | "keep_scene"
+    | "inspect_window"
+    | "seek"
+    | "retry_inspect"
+    | "ask_current";
+  label: string;
+  atMs?: number;
+  startMs?: number;
+  endMs?: number;
+  centerMs?: number;
+  beforeMs?: number;
+  afterMs?: number;
+}
+
+export interface FrameCardDTO {
+  timeMs: number;
+  description?: string;
+}
+
+export type AgentTurnDTO =
+  | {
+      type: "answer";
+      message: string;
+      grounding?: VisualObservationDTO;
+      suggestedActions: SuggestedActionDTO[];
+      frames: FrameCardDTO[];
+    }
+  | { type: "edit_plan"; message: string; planId: string }
+  | { type: "question"; message: string; options?: string[] };
+
 export interface AgentRunDTO {
   id: string;
   input: string;
@@ -86,6 +130,8 @@ export interface AgentRunDTO {
   steps: AgentStepDTO[];
   summary: string | null;
   error: string | null;
+  turn?: AgentTurnDTO | null;
+  grounding?: VisualObservationDTO | null;
 }
 
 export interface OperationLogDTO {
@@ -156,13 +202,18 @@ export interface ProjectDTO {
 }
 
 export interface IntegrationDTO {
-  provider: "local" | "openai" | "aios";
+  provider: "local" | "openai" | "aios" | "zeabur";
   providerName: string;
   aios: {
     configured: boolean;
     kernelUrl?: string;
     model: string;
     backend: string;
+  };
+  zeabur?: {
+    configured: boolean;
+    visionConfigured: boolean;
+    visionModel: string;
   };
 }
 

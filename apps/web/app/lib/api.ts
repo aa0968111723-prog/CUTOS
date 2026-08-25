@@ -1,9 +1,11 @@
 import type {
+  AgentTurnDTO,
   HealthDTO,
   PreviewManifest,
   ProjectDTO,
   ProjectSummaryDTO,
   ReadinessDTO,
+  SuggestedActionDTO,
   VersionDTO,
 } from "./types.js";
 
@@ -97,15 +99,25 @@ export async function getJob(id: string): Promise<JobDTO> {
   return parse(await fetch(`/api/jobs/${id}`, { cache: "no-store" }));
 }
 
+export interface PlanRequestBody {
+  instruction: string;
+  playheadMs?: number;
+  selectedRange?: { startMs: number; endMs: number };
+  previewMode?: "edited" | "original";
+  timelineRevision?: number;
+  action?: SuggestedActionDTO;
+}
+
 export async function requestPlan(
   id: string,
   instruction: string,
-): Promise<{ runId: string; status: string; dto: ProjectDTO }> {
+  playback?: Omit<PlanRequestBody, "instruction">,
+): Promise<{ runId: string; status: string; dto: ProjectDTO; turn: AgentTurnDTO | null }> {
   return parse(
     await fetch(`/api/projects/${id}/plan`, {
       method: "POST",
       headers: jsonHeaders,
-      body: JSON.stringify({ instruction }),
+      body: JSON.stringify({ instruction, ...playback }),
     }),
   );
 }

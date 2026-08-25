@@ -9,6 +9,8 @@ export interface OpenAICompatibleOptions {
   baseUrl: string;
   apiKey: string;
   model: string;
+  /** Override the planner name (e.g. `zeabur:gpt-4o`). */
+  name?: string;
   /** Injectable for testing. Defaults to global fetch. */
   fetchImpl?: typeof fetch;
 }
@@ -31,7 +33,7 @@ export class OpenAICompatiblePlanner implements Planner {
 
   constructor(options: OpenAICompatibleOptions) {
     this.options = options;
-    this.name = `openai-compatible:${options.model}`;
+    this.name = options.name ?? `openai-compatible:${options.model}`;
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
